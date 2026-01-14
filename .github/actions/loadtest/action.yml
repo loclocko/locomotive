@@ -80,8 +80,7 @@ runs:
           echo "      repository: YOUR_ORG/locomotive"
           echo "      path: locomotive"
           echo "      ref: master  # или main, в зависимости от вашей default branch"
-          echo "      # Для приватных репо добавьте:"
-          echo "      # token: \${{ secrets.LOCOMOTIVE_TOKEN }}"
+          echo "      # Для приватных репо добавьте token с PAT"
           exit 1
         fi
         echo "✓ locomotive found"
@@ -168,7 +167,7 @@ runs:
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: ${{ inputs.results_artifact }}-${{ github.run_number }}
+        name: ${{ inputs.results_artifact }}-${{ github.run_id }}
         path: loadtest-artifacts/
         retention-days: 30
 
@@ -250,6 +249,7 @@ runs:
             }
           }
           
+          const runId = process.env.GITHUB_RUN_ID || 'unknown';
           const body = `## 🚀 Load Test Results ${statusEmoji} ${statusText}
 
 | Metric | Value |
@@ -260,7 +260,7 @@ runs:
 | Error Rate | ${errorRate}% |
 | Total Requests | ${requests} |
 
-[View full report](../actions/runs/${{ github.run_id }})
+[View full report](../actions/runs/${runId})
 `;
           
           github.rest.issues.createComment({
