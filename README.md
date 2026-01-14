@@ -200,6 +200,18 @@ loco ci --config loconfig.json --set-baseline
 
 ## GitHub Actions
 
+### Настройка токена для приватного репозитория
+
+Если репозиторий `locomotive` приватный, создайте Personal Access Token (PAT):
+
+1. GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)
+2. Generate new token (classic)
+3. Выберите права: `repo` (полный доступ к репозиториям)
+4. Скопируйте токен
+5. В целевом репозитории: Settings → Secrets and variables → Actions → New repository secret
+6. Name: `LOCOMOTIVE_TOKEN`
+7. Value: вставьте токен
+
 ### Использование готового Action (рекомендуется)
 
 Самый простой способ — использовать готовый GitHub Action из библиотеки:
@@ -225,12 +237,14 @@ jobs:
           repository: YOUR_ORG/locomotive
           path: locomotive
           token: ${{ secrets.LOCOMOTIVE_TOKEN }}
+          ref: main
 
       - name: Run load test
         uses: ./locomotive/.github/actions/loadtest
         with:
           config: loconfig.json
           lib_repo: YOUR_ORG/locomotive
+          lib_token: ${{ secrets.LOCOMOTIVE_TOKEN }}
 
       - name: Set baseline
         if: github.ref == 'refs/heads/main'
@@ -238,6 +252,7 @@ jobs:
         with:
           config: loconfig.json
           lib_repo: YOUR_ORG/locomotive
+          lib_token: ${{ secrets.LOCOMOTIVE_TOKEN }}
           set_baseline: true
 ```
 

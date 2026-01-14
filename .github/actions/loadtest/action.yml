@@ -79,6 +79,8 @@ runs:
           echo "    with:"
           echo "      repository: YOUR_ORG/locomotive"
           echo "      path: locomotive"
+          echo "      token: \${{ secrets.LOCOMOTIVE_TOKEN }}"
+          echo "      ref: main"
           exit 1
         fi
         echo "✓ locomotive found"

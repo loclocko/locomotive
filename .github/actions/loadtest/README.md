@@ -13,6 +13,7 @@ GitHub Action для запуска нагрузочного тестирова�
     repository: YOUR_ORG/locomotive
     path: locomotive
     token: ${{ secrets.LOCOMOTIVE_TOKEN }}
+    ref: main
 
 - name: Run load test
   uses: ./locomotive/.github/actions/loadtest
@@ -41,7 +42,7 @@ GitHub Action для запуска нагрузочного тестирова�
 
 | Параметр | Описание | Обязательный | По умолчанию |
 |----------|----------|--------------|--------------|
-| `config` | Путь к конфигу ci-loadtest.json | Нет | `ci-loadtest.json` |
+| `config` | Путь к конфигу loconfig.json | Нет | `loconfig.json` |
 | `lib_repo` | Репозиторий библиотеки (owner/repo) | Да | - |
 | `lib_token` | GitHub токен для доступа к приватному репо | Нет | `github.token` |
 | `users` | Количество пользователей (переопределяет конфиг) | Нет | - |
@@ -65,8 +66,9 @@ GitHub Action для запуска нагрузочного тестирова�
   id: loadtest
   uses: ./locomotive/.github/actions/loadtest
   with:
-    config: ci-loadtest.json
+    config: loconfig.json
     lib_repo: YOUR_ORG/locomotive
+    lib_token: ${{ secrets.LOCOMOTIVE_TOKEN }}
 
 - name: Check status
   run: |
@@ -86,5 +88,6 @@ GitHub Action для запуска нагрузочного тестирова�
 ## Требования
 
 - Python 3.9+
-- Конфиг `ci-loadtest.json` в репозитории
+- Конфиг `loconfig.json` в репозитории
 - Доступ к репозиторию библиотеки (если приватный)
+- Для приватных репозиториев: секрет `LOCOMOTIVE_TOKEN` с PAT токеном
