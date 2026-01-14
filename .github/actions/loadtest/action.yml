@@ -1,0 +1,267 @@
+name: 'CI Load Test'
+description: 'Run load tests using ci-loadtest-lib'
+
+inputs:
+  config:
+    description: 'Path to ci-loadtest config file'
+    required: false
+    default: 'ci-loadtest.json'
+  
+  lib_repo:
+    description: 'Repository of ci-loadtest-lib (owner/repo)'
+    required: true
+  
+  lib_token:
+    description: 'GitHub token for accessing private lib repo (optional, uses GITHUB_TOKEN if not provided)'
+    required: false
+  
+  lib_ref:
+    description: 'Git ref (branch/tag) to checkout from lib repo'
+    required: false
+    default: 'main'
+  
+  users:
+    description: 'Override number of users'
+    required: false
+  
+  run_time:
+    description: 'Override run time (e.g., 30s, 1m)'
+    required: false
+  
+  set_baseline:
+    description: 'Set this run as baseline and upload artifact'
+    required: false
+    default: 'false'
+  
+  baseline_artifact:
+    description: 'Name of baseline artifact to download/upload'
+    required: false
+    default: 'loadtest-baseline'
+  
+  results_artifact:
+    description: 'Name of results artifact to upload'
+    required: false
+    default: 'loadtest-results'
+  
+  post_pr_comment:
+    description: 'Post results as comment to PR'
+    required: false
+    default: 'true'
+  
+  github_token:
+    description: 'GitHub token for posting PR comments (uses github.token if not provided)'
+    required: false
+
+outputs:
+  metrics_path:
+    description: 'Path to metrics.json file'
+    value: ${{ steps.run.outputs.metrics_path }}
+  
+  report_path:
+    description: 'Path to report.html file'
+    value: ${{ steps.run.outputs.report_path }}
+  
+  status:
+    description: 'Test status (PASS/WARNING/DEGRADATION)'
+    value: ${{ steps.run.outputs.status }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout ci-loadtest-lib
+      shell: bash
+      run: |
+        # Check if already checked out (e.g., by workflow)
+        if [ -d "ci-loadtest-lib/.git" ]; then
+          echo "ci-loadtest-lib already checked out, using existing"
+          cd ci-loadtest-lib
+          git fetch origin "${{ inputs.lib_ref }}"
+          git checkout "${{ inputs.lib_ref }}" || git checkout FETCH_HEAD
+          cd ..
+        else
+          echo "Checking out ci-loadtest-lib..."
+          git clone --depth 1 --branch "${{ inputs.lib_ref }}" \
+            "https://x-access-token:${{ inputs.lib_token || github.token }}@github.com/${{ inputs.lib_repo }}.git" \
+            ci-loadtest-lib || exit 1
+        fi
+        echo "✓ ci-loadtest-lib ready"
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        pip install --quiet --upgrade pip
+        pip install --quiet locust PyYAML
+        
+        # Install ci-loadtest-lib from local checkout
+        echo "Installing ci-loadtest-lib..."
+        pip install --quiet ./ci-loadtest-lib
+        
+        echo "✓ Installed:"
+        pip show ci-loadtest-lib | grep -E "Name|Version" || true
+
+    - name: Download baseline
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        name: ${{ inputs.baseline_artifact }}
+        path: loadtest-artifacts/
+
+    - name: Run load test
+      id: run
+      shell: bash
+      run: |
+        echo "=== Running Load Test ==="
+        
+        # Build command
+        CMD="ci-loadtest ci --config ${{ inputs.config }}"
+        
+        if [ -n "${{ inputs.users }}" ]; then
+          CMD="$CMD --users ${{ inputs.users }}"
+        fi
+        
+        if [ -n "${{ inputs.run_time }}" ]; then
+          CMD="$CMD --run-time ${{ inputs.run_time }}"
+        fi
+        
+        if [ "${{ inputs.set_baseline }}" == "true" ]; then
+          CMD="$CMD --set-baseline"
+        fi
+        
+        echo "Command: $CMD"
+        $CMD || EXIT_CODE=$?
+        
+        # Find metrics and report paths
+        ARTIFACTS_DIR="loadtest-artifacts/runs"
+        if [ -d "$ARTIFACTS_DIR" ]; then
+          RUN_DIR=$(ls -td "$ARTIFACTS_DIR"/*/ 2>/dev/null | head -1)
+          if [ -n "$RUN_DIR" ]; then
+            METRICS_PATH="$RUN_DIR/metrics.json"
+            REPORT_PATH="$RUN_DIR/report.html"
+            
+            if [ -f "$METRICS_PATH" ]; then
+              echo "metrics_path=$METRICS_PATH" >> $GITHUB_OUTPUT
+              echo "report_path=$REPORT_PATH" >> $GITHUB_OUTPUT
+              
+              # Extract status from analysis if exists
+              ANALYSIS_PATH="$RUN_DIR/analysis.json"
+              if [ -f "$ANALYSIS_PATH" ]; then
+                STATUS=$(python3 -c "import json; print(json.load(open('$ANALYSIS_PATH')).get('status', 'UNKNOWN'))" 2>/dev/null || echo "UNKNOWN")
+                echo "status=$STATUS" >> $GITHUB_OUTPUT
+              fi
+              
+              echo ""
+              echo "=== Metrics ==="
+              cat "$METRICS_PATH" | python3 -m json.tool || cat "$METRICS_PATH"
+            fi
+          fi
+        fi
+        
+        exit ${EXIT_CODE:-0}
+      env:
+        GITHUB_SHA: ${{ github.sha }}
+
+    - name: Upload results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: ${{ inputs.results_artifact }}-${{ github.run_number }}
+        path: loadtest-artifacts/
+        retention-days: 30
+
+    - name: Upload baseline
+      if: inputs.set_baseline == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.baseline_artifact }}
+        path: loadtest-artifacts/
+        retention-days: 90
+
+    - name: Post PR comment
+      if: github.event_name == 'pull_request' && inputs.post_pr_comment == 'true' && always()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const path = require('path');
+          
+          const artifactsDir = 'loadtest-artifacts/runs';
+          if (!fs.existsSync(artifactsDir)) {
+            console.log('No artifacts found, skipping comment');
+            return;
+          }
+          
+          const runs = fs.readdirSync(artifactsDir)
+            .map(run => path.join(artifactsDir, run))
+            .filter(run => fs.statSync(run).isDirectory())
+            .sort((a, b) => fs.statSync(b).mtime - fs.statSync(a).mtime);
+          
+          if (runs.length === 0) {
+            console.log('No runs found, skipping comment');
+            return;
+          }
+          
+          const metricsPath = path.join(runs[0], 'metrics.json');
+          if (!fs.existsSync(metricsPath)) {
+            console.log('No metrics found, skipping comment');
+            return;
+          }
+          
+          const metrics = JSON.parse(fs.readFileSync(metricsPath, 'utf8'));
+          const analysisPath = path.join(runs[0], 'analysis.json');
+          
+          const fmt = (val) => val == null ? 'N/A' : typeof val === 'number' ? val.toFixed(2) : String(val);
+          
+          const rps = fmt(metrics.rps);
+          const avgMs = fmt(metrics.avg_ms);
+          const p95Ms = fmt(metrics.p95_ms);
+          const errorRate = fmt(metrics.error_rate);
+          const requests = metrics.requests || 'N/A';
+          
+          let statusEmoji = '⚪';
+          let statusText = 'Unknown';
+          
+          if (fs.existsSync(analysisPath)) {
+            const analysis = JSON.parse(fs.readFileSync(analysisPath, 'utf8'));
+            const status = analysis.status || 'UNKNOWN';
+            if (status === 'PASS') {
+              statusEmoji = '✅';
+              statusText = 'Passed';
+            } else if (status === 'WARNING') {
+              statusEmoji = '⚠️';
+              statusText = 'Warning';
+            } else if (status === 'DEGRADATION') {
+              statusEmoji = '❌';
+              statusText = 'Degradation';
+            } else {
+              statusText = status;
+            }
+          } else {
+            const errRate = parseFloat(metrics.error_rate) || 0;
+            if (errRate < 5) {
+              statusEmoji = '✅';
+              statusText = 'Passed';
+            } else {
+              statusEmoji = '❌';
+              statusText = 'Failed';
+            }
+          }
+          
+          const body = `## 🚀 Load Test Results ${statusEmoji} ${statusText}
+
+| Metric | Value |
+|--------|-------|
+| RPS | ${rps} |
+| Avg Response | ${avgMs} ms |
+| P95 Response | ${p95Ms} ms |
+| Error Rate | ${errorRate}% |
+| Total Requests | ${requests} |
+
+[View full report](../actions/runs/${{ github.run_id }})
+`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: body
+          });

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=65"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ci-loadtest-lib"
+version = "0.1.0"
+description = "CI/CD load testing runner and regression analyzer for Locust"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "PyYAML>=6.0",
+]
+
+[project.scripts]
+ci-loadtest = "locust_runner.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["locust_runner*"]

@@ -1,0 +1,105 @@
+{
+  "_comment": "Конфигурация нагрузочного тестирования для dummy сервиса (без locustfile)",
+  "load": {
+    "host": "${DUMMY_SERVICE_URL:-http://localhost:8000}",
+    "users": 20,
+    "spawn_rate": 5,
+    "run_time": "1m",
+    "stop_timeout": 10
+  },
+  "scenario": {
+    "think_time": {
+      "min": 0.5,
+      "max": 2.0
+    },
+    "headers": {
+      "Accept": "application/json",
+      "Content-Type": "application/json"
+    },
+    "requests": [
+      {
+        "name": "Health Check",
+        "method": "GET",
+        "path": "/health",
+        "weight": 1,
+        "tags": ["smoke", "health"]
+      },
+      {
+        "name": "Get Version",
+        "method": "GET",
+        "path": "/version",
+        "weight": 2,
+        "query": {
+          "profile": "default"
+        },
+        "tags": ["api"]
+      },
+      {
+        "name": "Fast Work",
+        "method": "GET",
+        "path": "/work/fast",
+        "weight": 5,
+        "headers": {
+          "X-Perf-Profile": "fast"
+        },
+        "tags": ["api", "performance"]
+      },
+      {
+        "name": "Slow Work",
+        "method": "GET",
+        "path": "/work/slow",
+        "weight": 2,
+        "headers": {
+          "X-Perf-Profile": "slow"
+        },
+        "tags": ["api", "performance"]
+      },
+      {
+        "name": "Echo Data",
+        "method": "POST",
+        "path": "/work/echo",
+        "weight": 3,
+        "json": {
+          "message": "load test payload",
+          "timestamp": "${timestamp}",
+          "iteration": "${iteration}"
+        },
+        "tags": ["api", "mutation"]
+      }
+    ]
+  },
+  "artifacts": {
+    "storage": "artifacts",
+    "run_id": "${GITHUB_SHA:-local}"
+  },
+  "analysis": {
+    "rules": [
+      {
+        "metric": "p95_ms",
+        "mode": "relative",
+        "direction": "increase",
+        "warn": 10,
+        "fail": 25
+      },
+      {
+        "metric": "error_rate",
+        "mode": "absolute",
+        "direction": "increase",
+        "warn": 1,
+        "fail": 5
+      },
+      {
+        "metric": "rps",
+        "mode": "relative",
+        "direction": "decrease",
+        "warn": 10,
+        "fail": 20
+      }
+    ],
+    "fail_on": "DEGRADATION"
+  },
+  "report": {
+    "title": "Dummy Service Load Test",
+    "output": "artifacts/report.html"
+  }
+}

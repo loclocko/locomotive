@@ -1,0 +1,39 @@
+{
+  "rules": [
+    {
+      "metric": "p95_ms",
+      "mode": "relative",
+      "direction": "increase",
+      "warn": 10,
+      "fail": 20
+    },
+    {
+      "metric": "p99_ms",
+      "mode": "relative",
+      "direction": "increase",
+      "warn": 15,
+      "fail": 30
+    },
+    {
+      "metric": "avg_ms",
+      "mode": "relative",
+      "direction": "increase",
+      "warn": 10,
+      "fail": 20
+    },
+    {
+      "metric": "rps",
+      "mode": "relative",
+      "direction": "decrease",
+      "warn": 10,
+      "fail": 20
+    },
+    {
+      "metric": "error_rate",
+      "mode": "absolute",
+      "direction": "increase",
+      "warn": 0.5,
+      "fail": 1.0
+    }
+  ]
+}

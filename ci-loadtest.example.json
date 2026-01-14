@@ -1,0 +1,24 @@
+{
+  "locust": {
+    "locustfile": "tests/locustfile.py",
+    "host": "http://localhost:8080",
+    "users": 50,
+    "spawn_rate": 5,
+    "run_time": "1m",
+    "tags": [],
+    "exclude_tags": [],
+    "extra_args": []
+  },
+  "artifacts": {
+    "storage": "artifacts",
+    "run_id": "${GITHUB_SHA}"
+  },
+  "analysis": {
+    "rules_file": "rules.json",
+    "fail_on": "DEGRADATION"
+  },
+  "report": {
+    "title": "CI Load Test Report",
+    "output": "artifacts/report.html"
+  }
+}
