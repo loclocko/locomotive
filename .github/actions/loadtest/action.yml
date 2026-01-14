@@ -250,18 +250,19 @@ runs:
           }
           
           const runId = process.env.GITHUB_RUN_ID || 'unknown';
-          const body = `## 🚀 Load Test Results ${statusEmoji} ${statusText}
-
-| Metric | Value |
-|--------|-------|
-| RPS | ${rps} |
-| Avg Response | ${avgMs} ms |
-| P95 Response | ${p95Ms} ms |
-| Error Rate | ${errorRate}% |
-| Total Requests | ${requests} |
-
-[View full report](../actions/runs/${runId})
-`;
+          const body = [
+            `## 🚀 Load Test Results ${statusEmoji} ${statusText}`,
+            '',
+            '| Metric | Value |',
+            '|--------|-------|',
+            `| RPS | ${rps} |`,
+            `| Avg Response | ${avgMs} ms |`,
+            `| P95 Response | ${p95Ms} ms |`,
+            `| Error Rate | ${errorRate}% |`,
+            `| Total Requests | ${requests} |`,
+            '',
+            `[View full report](../actions/runs/${runId})`
+          ].join('\n');
           
           github.rest.issues.createComment({
             issue_number: context.issue.number,
