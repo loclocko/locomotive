@@ -9,6 +9,11 @@ GitHub Action для запуска нагрузочного тестирова�
 Если репозиторий публичный, токены не нужны:
 
 ```yaml
+- name: Set up Python
+  uses: actions/setup-python@v5
+  with:
+    python-version: '3.13'
+
 - name: Checkout locomotive
   uses: actions/checkout@v4
   with:
@@ -28,6 +33,11 @@ GitHub Action для запуска нагрузочного тестирова�
 Если репозиторий приватный, нужен токен `LOCOMOTIVE_TOKEN`:
 
 ```yaml
+- name: Set up Python
+  uses: actions/setup-python@v5
+  with:
+    python-version: '3.9'
+
 - name: Checkout locomotive
   uses: actions/checkout@v4
   with:

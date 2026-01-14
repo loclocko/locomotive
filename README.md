@@ -227,6 +227,11 @@ jobs:
       - name: Checkout project
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
       - name: Checkout locomotive
         uses: actions/checkout@v4
         with:
@@ -275,6 +280,11 @@ jobs:
     steps:
       - name: Checkout project
         uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
 
       - name: Checkout locomotive
         uses: actions/checkout@v4

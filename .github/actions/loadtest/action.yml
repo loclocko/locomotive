@@ -88,8 +88,19 @@ runs:
     - name: Install dependencies
       shell: bash
       run: |
-        pip install --quiet --upgrade pip
-        pip install --quiet locust PyYAML
+        # Check Python availability
+        if ! command -v python3 &> /dev/null; then
+          echo "Error: python3 not found!"
+          echo "Please add 'Setup Python' step before using this action:"
+          echo "  - name: Set up Python"
+          echo "    uses: actions/setup-python@v5"
+          echo "    with:"
+          echo "      python-version: '3.9'"
+          exit 1
+        fi
+        
+        python3 -m pip install --quiet --upgrade pip
+        python3 -m pip install --quiet locust PyYAML
         
         # Install locomotive from local checkout
         if [ ! -d "locomotive" ]; then
@@ -97,10 +108,10 @@ runs:
           exit 1
         fi
         echo "Installing locomotive..."
-        pip install --quiet ./locomotive
+        python3 -m pip install --quiet ./locomotive
         
         echo "✓ Installed:"
-        pip show locomotive | grep -E "Name|Version" || true
+        python3 -m pip show locomotive | grep -E "Name|Version" || true
 
     - name: Download baseline
       uses: actions/download-artifact@v4
