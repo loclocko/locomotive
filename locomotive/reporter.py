@@ -79,6 +79,14 @@ def render_report(
             f"<div><strong>SKIP</strong> {summary.get('SKIP', 0)}</div>"
             "</div>"
         )
+    elif not baseline_metrics:
+        summary_html = (
+            "<div class=\"info-message\">"
+            "⚠️ <strong>First run detected:</strong> No baseline available for comparison. "
+            "This run will be used as baseline for future comparisons. "
+            "Set baseline manually with: <code>loco ci --set-baseline</code>"
+            "</div>"
+        )
 
     title_safe = html.escape(title)
     run_id = html.escape(str(run_meta.get("run_id")))
@@ -161,6 +169,23 @@ def render_report(
       font-size: 13px;
       color: var(--muted);
       margin-top: 12px;
+    }}
+    .info-message {{
+      background: #fef3c7;
+      border: 1px solid #fbbf24;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 13px;
+      color: #92400e;
+      margin-top: 12px;
+      line-height: 1.5;
+    }}
+    .info-message code {{
+      background: rgba(0, 0, 0, 0.1);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 12px;
     }}
   </style>
 </head>

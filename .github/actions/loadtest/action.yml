@@ -119,6 +119,8 @@ runs:
       with:
         name: ${{ inputs.baseline_artifact }}
         path: loadtest-artifacts/
+      env:
+        ACTIONS_STEP_DEBUG: false
 
     - name: Run load test
       id: run
@@ -126,8 +128,8 @@ runs:
       run: |
         echo "=== Running Load Test ==="
         
-        # Build command
-        CMD="loco ci --config ${{ inputs.config }}"
+        # Build command - --config must come before subcommand
+        CMD="loco --config ${{ inputs.config }} ci"
         
         if [ -n "${{ inputs.users }}" ]; then
           CMD="$CMD --users ${{ inputs.users }}"
