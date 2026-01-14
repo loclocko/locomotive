@@ -3,7 +3,7 @@ requires = ["setuptools>=65"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ci-loadtest-lib"
+name = "locomotive"
 version = "0.1.0"
 description = "CI/CD load testing runner and regression analyzer for Locust"
 readme = "README.md"
@@ -13,8 +13,8 @@ dependencies = [
 ]
 
 [project.scripts]
-ci-loadtest = "locust_runner.cli:main"
+loco = "locomotive.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["locust_runner*"]
+include = ["locomotive*"]

@@ -17,7 +17,7 @@ from .storage import Storage
 from .template import generate_template, generate_github_workflow
 
 
-DEFAULT_CONFIG = "ci-loadtest.json"
+DEFAULT_CONFIG = "loconfig.json"
 
 
 def _get_section(config: Dict[str, Any], name: str) -> Dict[str, Any]:
@@ -208,7 +208,7 @@ def _exit_code_for_status(status: str, fail_on: str) -> int:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    """Initialize a new ci-loadtest configuration."""
+    """Initialize a new loconfig configuration."""
     output_path = Path(args.output)
     openapi_path = Path(args.openapi) if args.openapi else None
     host = args.host or "http://localhost:8000"
@@ -232,7 +232,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     print()
     print("Next steps:")
     print(f"  1. Edit {output_path} to configure your endpoints")
-    print("  2. Run: ci-loadtest ci --config", output_path)
+    print("  2. Run: loco ci --config", output_path)
     
     return 0
 
@@ -322,16 +322,16 @@ def cmd_ci(args: argparse.Namespace, config: Dict[str, Any]) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="ci-loadtest",
-        description="CI/CD load testing runner and regression analyzer for Locust",
+        prog="loco",
+        description="Locomotive - CI/CD load testing runner and regression analyzer for Locust",
     )
     parser.add_argument("--config", default=DEFAULT_CONFIG, help="Path to config JSON/YAML")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # init command
-    init_parser = subparsers.add_parser("init", help="Initialize a new ci-loadtest configuration")
-    init_parser.add_argument("--output", "-o", default="ci-loadtest.json", help="Output config file path")
+    init_parser = subparsers.add_parser("init", help="Initialize a new loconfig configuration")
+    init_parser.add_argument("--output", "-o", default="loconfig.json", help="Output config file path")
     init_parser.add_argument("--openapi", help="Path to OpenAPI spec to generate request templates")
     init_parser.add_argument("--host", help="Default host URL")
     init_parser.add_argument("--github-workflow", action="store_true", help="Also generate GitHub Actions workflow")

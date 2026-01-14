@@ -1,18 +1,18 @@
 name: 'CI Load Test'
-description: 'Run load tests using ci-loadtest-lib'
+description: 'Run load tests using Locomotive library'
 
 inputs:
   config:
-    description: 'Path to ci-loadtest config file'
+    description: 'Path to loconfig config file'
     required: false
-    default: 'ci-loadtest.json'
+    default: 'loconfig.json'
   
   lib_repo:
-    description: 'Repository of ci-loadtest-lib (owner/repo)'
+    description: 'Repository of Locomotive library (owner/repo)'
     required: true
   
   lib_token:
-    description: 'GitHub token for accessing private lib repo (optional, uses GITHUB_TOKEN if not provided)'
+    description: 'GitHub PAT token for accessing private lib repo (required for private repos)'
     required: false
   
   lib_ref:
@@ -68,23 +68,20 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Checkout ci-loadtest-lib
+    - name: Verify locomotive is checked out
       shell: bash
       run: |
-        # Check if already checked out (e.g., by workflow)
-        if [ -d "ci-loadtest-lib/.git" ]; then
-          echo "ci-loadtest-lib already checked out, using existing"
-          cd ci-loadtest-lib
-          git fetch origin "${{ inputs.lib_ref }}"
-          git checkout "${{ inputs.lib_ref }}" || git checkout FETCH_HEAD
-          cd ..
-        else
-          echo "Checking out ci-loadtest-lib..."
-          git clone --depth 1 --branch "${{ inputs.lib_ref }}" \
-            "https://x-access-token:${{ inputs.lib_token || github.token }}@github.com/${{ inputs.lib_repo }}.git" \
-            ci-loadtest-lib || exit 1
+        if [ ! -d "locomotive" ]; then
+          echo "Error: locomotive library not found!"
+          echo "Make sure to checkout the library before using this action:"
+          echo "  - name: Checkout locomotive"
+          echo "    uses: actions/checkout@v4"
+          echo "    with:"
+          echo "      repository: YOUR_ORG/locomotive"
+          echo "      path: locomotive"
+          exit 1
         fi
-        echo "✓ ci-loadtest-lib ready"
+        echo "✓ locomotive found"
 
     - name: Install dependencies
       shell: bash
@@ -92,12 +89,16 @@ runs:
         pip install --quiet --upgrade pip
         pip install --quiet locust PyYAML
         
-        # Install ci-loadtest-lib from local checkout
-        echo "Installing ci-loadtest-lib..."
-        pip install --quiet ./ci-loadtest-lib
+        # Install locomotive from local checkout
+        if [ ! -d "locomotive" ]; then
+          echo "Error: locomotive directory not found!"
+          exit 1
+        fi
+        echo "Installing locomotive..."
+        pip install --quiet ./locomotive
         
         echo "✓ Installed:"
-        pip show ci-loadtest-lib | grep -E "Name|Version" || true
+        pip show locomotive | grep -E "Name|Version" || true
 
     - name: Download baseline
       uses: actions/download-artifact@v4
@@ -113,7 +114,7 @@ runs:
         echo "=== Running Load Test ==="
         
         # Build command
-        CMD="ci-loadtest ci --config ${{ inputs.config }}"
+        CMD="loco ci --config ${{ inputs.config }}"
         
         if [ -n "${{ inputs.users }}" ]; then
           CMD="$CMD --users ${{ inputs.users }}"

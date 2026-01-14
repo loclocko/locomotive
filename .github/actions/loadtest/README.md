@@ -1,35 +1,35 @@
 # CI Load Test Action
 
-GitHub Action для запуска нагрузочного тестирования с использованием ci-loadtest-lib.
+GitHub Action для запуска нагрузочного тестирования с использованием Locomotive.
 
 ## Использование
 
 ### Базовый пример
 
 ```yaml
-- name: Checkout ci-loadtest-lib
+- name: Checkout locomotive
   uses: actions/checkout@v4
   with:
-    repository: YOUR_ORG/ci-loadtest-lib
-    path: ci-loadtest-lib
-    token: ${{ secrets.CI_LOADTEST_LIB_TOKEN || github.token }}
+    repository: YOUR_ORG/locomotive
+    path: locomotive
+    token: ${{ secrets.LOCOMOTIVE_TOKEN }}
 
 - name: Run load test
-  uses: ./ci-loadtest-lib/.github/actions/loadtest
+  uses: ./locomotive/.github/actions/loadtest
   with:
     config: ci-loadtest.json
-    lib_repo: YOUR_ORG/ci-loadtest-lib
+    lib_repo: YOUR_ORG/locomotive
 ```
 
 ### Полный пример с параметрами
 
 ```yaml
 - name: Run load test
-  uses: ./ci-loadtest-lib/.github/actions/loadtest
+  uses: ./locomotive/.github/actions/loadtest
   with:
     config: ci-loadtest.json
-    lib_repo: YOUR_ORG/ci-loadtest-lib
-    lib_token: ${{ secrets.CI_LOADTEST_LIB_TOKEN }}
+    lib_repo: YOUR_ORG/locomotive
+    lib_token: ${{ secrets.LOCOMOTIVE_TOKEN }}
     users: 50
     run_time: 2m
     set_baseline: false
@@ -63,10 +63,10 @@ GitHub Action для запуска нагрузочного тестирова�
 ```yaml
 - name: Run load test
   id: loadtest
-  uses: ./ci-loadtest-lib/.github/actions/loadtest
+  uses: ./locomotive/.github/actions/loadtest
   with:
     config: ci-loadtest.json
-    lib_repo: YOUR_ORG/ci-loadtest-lib
+    lib_repo: YOUR_ORG/locomotive
 
 - name: Check status
   run: |
@@ -78,7 +78,7 @@ GitHub Action для запуска нагрузочного тестирова�
 ## Что делает action
 
 1. Устанавливает зависимости (locust, PyYAML)
-2. Устанавливает ci-loadtest-lib из указанного репозитория
+2. Устанавливает Locomotive из указанного репозитория
 3. Скачивает baseline артефакты (если есть)
 4. Запускает нагрузочный тест
 5. Загружает результаты в артефакты

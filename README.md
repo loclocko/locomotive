@@ -1,4 +1,4 @@
-# CI Loadtest Library
+# Locomotive - CI Load Testing Library
 
 Python-библиотека и CLI для интеграции нагрузочного тестирования в CI/CD пайплайны. Использует Locust под капотом, но позволяет описывать тесты декларативно в JSON/YAML конфиге — без написания Python кода.
 
@@ -14,25 +14,25 @@ Python-библиотека и CLI для интеграции нагрузоч�
 ### 1. Установка
 
 ```bash
-pip install ci-loadtest-lib locust
+pip install locomotive locust
 ```
 
 ### 2. Создание конфига
 
 ```bash
 # Базовый шаблон
-ci-loadtest init
+loco init
 
 # Или с предзаполнением из OpenAPI (шаблон для ручной правки)
-ci-loadtest init --openapi openapi.json
+loco init --openapi openapi.json
 
 # С генерацией GitHub Actions workflow
-ci-loadtest init --github-workflow
+loco init --github-workflow
 ```
 
 ### 3. Редактирование конфига
 
-Открой `ci-loadtest.json` и настрой эндпоинты:
+Открой `loconfig.json` и настрой эндпоинты:
 
 ```json
 {
@@ -79,10 +79,10 @@ ci-loadtest init --github-workflow
 
 ```bash
 # Полный CI пайплайн: тест → анализ → отчёт
-ci-loadtest ci --config ci-loadtest.json
+loco ci --config loconfig.json
 
 # Установить baseline (обычно на main ветке)
-ci-loadtest ci --config ci-loadtest.json --set-baseline
+loco ci --config loconfig.json --set-baseline
 ```
 
 ## Формат конфига
@@ -219,25 +219,25 @@ jobs:
       - name: Checkout project
         uses: actions/checkout@v4
 
-      - name: Checkout ci-loadtest-lib
+      - name: Checkout locomotive
         uses: actions/checkout@v4
         with:
-          repository: YOUR_ORG/ci-loadtest-lib
-          path: ci-loadtest-lib
-          token: ${{ secrets.CI_LOADTEST_LIB_TOKEN || github.token }}
+          repository: YOUR_ORG/locomotive
+          path: locomotive
+          token: ${{ secrets.LOCOMOTIVE_TOKEN }}
 
       - name: Run load test
-        uses: ./ci-loadtest-lib/.github/actions/loadtest
+        uses: ./locomotive/.github/actions/loadtest
         with:
-          config: ci-loadtest.json
-          lib_repo: YOUR_ORG/ci-loadtest-lib
+          config: loconfig.json
+          lib_repo: YOUR_ORG/locomotive
 
       - name: Set baseline
         if: github.ref == 'refs/heads/main'
-        uses: ./ci-loadtest-lib/.github/actions/loadtest
+        uses: ./locomotive/.github/actions/loadtest
         with:
-          config: ci-loadtest.json
-          lib_repo: YOUR_ORG/ci-loadtest-lib
+          config: loconfig.json
+          lib_repo: YOUR_ORG/locomotive
           set_baseline: true
 ```
 
@@ -274,13 +274,13 @@ jobs:
       - name: Install
         run: |
           pip install locust PyYAML
-          pip install "git+https://x-access-token:${{ secrets.CI_LOADTEST_LIB_TOKEN }}@github.com/YOUR_ORG/ci-loadtest-lib.git"
+          pip install "git+https://x-access-token:${{ secrets.LOCOMOTIVE_TOKEN }}@github.com/YOUR_ORG/locomotive.git"
       
       - name: Start service
         run: docker-compose up -d
       
       - name: Run load test
-        run: ci-loadtest ci --config ci-loadtest.json
+        run: loco ci --config loconfig.json
         env:
           API_TOKEN: ${{ secrets.API_TOKEN }}
       
@@ -293,26 +293,26 @@ jobs:
       
       - name: Set baseline
         if: github.ref == 'refs/heads/main'
-        run: ci-loadtest ci --set-baseline
+        run: loco ci --set-baseline
 ```
 
 ## CLI команды
 
 ```bash
 # Инициализация конфига
-ci-loadtest init [--openapi spec.json] [--github-workflow]
+loco init [--openapi spec.json] [--github-workflow]
 
 # Полный пайплайн
-ci-loadtest ci --config ci-loadtest.json
+loco ci --config loconfig.json
 
 # Только запуск тестов
-ci-loadtest run --config ci-loadtest.json
+loco run --config loconfig.json
 
 # Только анализ
-ci-loadtest analyze --config ci-loadtest.json --baseline <run_id>
+loco analyze --config loconfig.json --baseline <run_id>
 
 # Только отчёт
-ci-loadtest report --config ci-loadtest.json
+loco report --config loconfig.json
 ```
 
 ## Использование с готовым locustfile

@@ -1,4 +1,4 @@
-"""Template generator for ci-loadtest configuration.
+"""Template generator for Locomotive configuration.
 
 This module generates a starter configuration file that users then edit manually.
 It can optionally read an OpenAPI spec to pre-populate the requests section.
@@ -86,7 +86,7 @@ def generate_template(
     host: str = "http://localhost:8000",
     openapi_path: Optional[Path] = None,
 ) -> None:
-    """Generate a ci-loadtest configuration template.
+    """Generate a Locomotive configuration template.
     
     Args:
         output_path: Where to write the config file.
@@ -124,7 +124,7 @@ def generate_template(
         ]
     
     config: Dict[str, Any] = {
-        "_comment": "CI Loadtest Configuration - edit this file for your project",
+        "_comment": "Locomotive Configuration - edit this file for your project",
         "load": {
             "host": host,
             "users": 10,
@@ -264,7 +264,7 @@ def generate_rules_template(output_path: Path) -> None:
     output_path.write_text(json.dumps(rules, indent=2), encoding="utf-8")
 
 
-def generate_github_workflow(output_path: Path, config_name: str = "ci-loadtest.json") -> None:
+def generate_github_workflow(output_path: Path, config_name: str = "loconfig.json") -> None:
     """Generate a GitHub Actions workflow template."""
     workflow = f'''name: Load Test
 
@@ -288,14 +288,14 @@ jobs:
       
       - name: Install dependencies
         run: |
-          pip install ci-loadtest-lib locust
+          pip install locomotive locust
       
       # TODO: Add step to start your service here
       # - name: Start service
       #   run: docker-compose up -d
       
       - name: Run load test
-        run: ci-loadtest ci --config {config_name}
+        run: loco ci --config {config_name}
         env:
           # Add your environment variables here
           # API_TOKEN: ${{{{ secrets.API_TOKEN }}}}
@@ -311,7 +311,7 @@ jobs:
       # Set baseline on main branch
       - name: Set baseline
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: ci-loadtest ci --config {config_name} --set-baseline
+        run: loco ci --config {config_name} --set-baseline
 '''
     
     output_path.parent.mkdir(parents=True, exist_ok=True)
