@@ -200,9 +200,58 @@ loco ci --config loconfig.json --set-baseline
 
 ## GitHub Actions
 
-### Настройка токена для приватного репозитория
+### Использование готового Action (рекомендуется)
 
-Если репозиторий `locomotive` приватный, создайте Personal Access Token (PAT):
+Самый простой способ — использовать готовый GitHub Action из библиотеки.
+
+#### Публичный репозиторий (проще всего)
+
+Если репозиторий `locomotive` публичный, токены не нужны:
+
+**Важно:** 
+- Замените `YOUR_ORG/locomotive` на реальное имя вашего репозитория (например, `loclocko/locomotive`)
+- Укажите правильную ветку в `ref` (например, `master` или `main`)
+
+```yaml
+name: Load Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  loadtest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Checkout locomotive
+        uses: actions/checkout@v4
+        with:
+          repository: YOUR_ORG/locomotive
+          path: locomotive
+          ref: master  # или main, в зависимости от вашей default branch
+
+      - name: Run load test
+        uses: ./locomotive/.github/actions/loadtest
+        with:
+          config: loconfig.json
+          lib_repo: YOUR_ORG/locomotive
+
+      - name: Set baseline
+        if: github.ref == 'refs/heads/main'
+        uses: ./locomotive/.github/actions/loadtest
+        with:
+          config: loconfig.json
+          lib_repo: YOUR_ORG/locomotive
+          set_baseline: true
+```
+
+#### Приватный репозиторий
+
+Если репозиторий приватный, нужен Personal Access Token (PAT):
 
 1. GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)
 2. Generate new token (classic)
@@ -211,10 +260,6 @@ loco ci --config loconfig.json --set-baseline
 5. В целевом репозитории: Settings → Secrets and variables → Actions → New repository secret
 6. Name: `LOCOMOTIVE_TOKEN`
 7. Value: вставьте токен
-
-### Использование готового Action (рекомендуется)
-
-Самый простой способ — использовать готовый GitHub Action из библиотеки:
 
 ```yaml
 name: Load Test
@@ -237,7 +282,7 @@ jobs:
           repository: YOUR_ORG/locomotive
           path: locomotive
           token: ${{ secrets.LOCOMOTIVE_TOKEN }}
-          ref: main
+          ref: master  # или main, в зависимости от вашей default branch
 
       - name: Run load test
         uses: ./locomotive/.github/actions/loadtest

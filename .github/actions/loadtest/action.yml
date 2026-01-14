@@ -18,7 +18,7 @@ inputs:
   lib_ref:
     description: 'Git ref (branch/tag) to checkout from lib repo'
     required: false
-    default: 'main'
+    default: 'master'
   
   users:
     description: 'Override number of users'
@@ -79,8 +79,9 @@ runs:
           echo "    with:"
           echo "      repository: YOUR_ORG/locomotive"
           echo "      path: locomotive"
-          echo "      token: \${{ secrets.LOCOMOTIVE_TOKEN }}"
-          echo "      ref: main"
+          echo "      ref: master  # или main, в зависимости от вашей default branch"
+          echo "      # Для приватных репо добавьте:"
+          echo "      # token: \${{ secrets.LOCOMOTIVE_TOKEN }}"
           exit 1
         fi
         echo "✓ locomotive found"

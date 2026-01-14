@@ -4,7 +4,28 @@ GitHub Action для запуска нагрузочного тестирова�
 
 ## Использование
 
-### Базовый пример
+### Публичный репозиторий (проще всего)
+
+Если репозиторий публичный, токены не нужны:
+
+```yaml
+- name: Checkout locomotive
+  uses: actions/checkout@v4
+  with:
+    repository: YOUR_ORG/locomotive
+    path: locomotive
+    ref: master  # или main, в зависимости от вашей default branch
+
+- name: Run load test
+  uses: ./locomotive/.github/actions/loadtest
+  with:
+    config: loconfig.json
+    lib_repo: YOUR_ORG/locomotive
+```
+
+### Приватный репозиторий
+
+Если репозиторий приватный, нужен токен `LOCOMOTIVE_TOKEN`:
 
 ```yaml
 - name: Checkout locomotive
@@ -13,13 +34,14 @@ GitHub Action для запуска нагрузочного тестирова�
     repository: YOUR_ORG/locomotive
     path: locomotive
     token: ${{ secrets.LOCOMOTIVE_TOKEN }}
-    ref: main
+    ref: master  # или main, в зависимости от вашей default branch
 
 - name: Run load test
   uses: ./locomotive/.github/actions/loadtest
   with:
-    config: ci-loadtest.json
+    config: loconfig.json
     lib_repo: YOUR_ORG/locomotive
+    lib_token: ${{ secrets.LOCOMOTIVE_TOKEN }}
 ```
 
 ### Полный пример с параметрами
@@ -28,9 +50,9 @@ GitHub Action для запуска нагрузочного тестирова�
 - name: Run load test
   uses: ./locomotive/.github/actions/loadtest
   with:
-    config: ci-loadtest.json
+    config: loconfig.json
     lib_repo: YOUR_ORG/locomotive
-    lib_token: ${{ secrets.LOCOMOTIVE_TOKEN }}
+    lib_token: ${{ secrets.LOCOMOTIVE_TOKEN }}  # только для приватных репо
     users: 50
     run_time: 2m
     set_baseline: false
@@ -44,7 +66,7 @@ GitHub Action для запуска нагрузочного тестирова�
 |----------|----------|--------------|--------------|
 | `config` | Путь к конфигу loconfig.json | Нет | `loconfig.json` |
 | `lib_repo` | Репозиторий библиотеки (owner/repo) | Да | - |
-| `lib_token` | GitHub токен для доступа к приватному репо | Нет | `github.token` |
+| `lib_token` | GitHub токен для доступа к приватному репо (только для приватных репо) | Нет | `github.token` |
 | `users` | Количество пользователей (переопределяет конфиг) | Нет | - |
 | `run_time` | Время выполнения теста (переопределяет конфиг) | Нет | - |
 | `set_baseline` | Установить этот запуск как baseline | Нет | `false` |
@@ -89,5 +111,4 @@ GitHub Action для запуска нагрузочного тестирова�
 
 - Python 3.9+
 - Конфиг `loconfig.json` в репозитории
-- Доступ к репозиторию библиотеки (если приватный)
-- Для приватных репозиториев: секрет `LOCOMOTIVE_TOKEN` с PAT токеном
+- Для приватных репозиториев: секрет `LOCOMOTIVE_TOKEN` с PAT токеном (см. инструкции в основном README)
