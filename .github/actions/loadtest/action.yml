@@ -31,7 +31,7 @@ inputs:
   set_baseline:
     description: 'Set this run as baseline and upload artifact'
     required: false
-    default: 'false'
+    default: 'true'
   
   baseline_artifact:
     description: 'Name of baseline artifact to download/upload'
