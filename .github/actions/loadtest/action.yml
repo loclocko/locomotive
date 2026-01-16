@@ -185,7 +185,7 @@ runs:
         retention-days: 30
 
     - name: Upload baseline
-      if: inputs.set_baseline == 'true'
+      if: inputs.set_baseline == 'true' && always()
       uses: actions/upload-artifact@v4
       with:
         name: ${{ inputs.baseline_artifact }}

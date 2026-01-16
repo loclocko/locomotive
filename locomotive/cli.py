@@ -354,9 +354,6 @@ def cmd_ci(args: argparse.Namespace, config: Dict[str, Any]) -> int:
     _maybe_generate_locustfile(storage, run_id, locust_config, config)
     run_result = _run(storage, run_id, locust_config)
 
-    if args.set_baseline and run_result.get("returncode") == 0:
-        storage.set_baseline(run_id)
-
     analysis_cfg = _get_section(config, "analysis")
     report_cfg = _get_section(config, "report")
     mode, gate_cfg = _resolve_gate_config(analysis_cfg)
@@ -395,11 +392,20 @@ def cmd_ci(args: argparse.Namespace, config: Dict[str, Any]) -> int:
         storage.save_json(storage.analysis_path(run_id), combined)
         analysis = combined
 
+    locust_code = int(run_result.get("returncode") or 0)
+    set_baseline = False
+    if args.set_baseline and metrics_exist:
+        if analysis:
+            set_baseline = analysis.get("status") == "PASS"
+        else:
+            set_baseline = locust_code == 0
+    if set_baseline:
+        storage.set_baseline(run_id)
+
     title = args.title or report_cfg.get("title") or "CI Load Test Report"
     output_path = args.output or report_cfg.get("output")
     _report(storage, run_id, baseline_id, title, output_path)
 
-    locust_code = int(run_result.get("returncode") or 0)
     if not metrics_exist:
         return locust_code or 1
     if locust_code != 0 and not mode:
