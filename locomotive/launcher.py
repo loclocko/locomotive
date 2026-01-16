@@ -14,6 +14,9 @@ def _normalize_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.lower())
 
 
+_STATUS_RE = re.compile(r"\b([1-5]\d{2})\b")
+
+
 def _safe_float(value: Any) -> Optional[float]:
     try:
         if value is None:
@@ -40,6 +43,26 @@ def _find_stats_csv(raw_dir: Path) -> Optional[Path]:
     if preferred.exists():
         return preferred
     matches = sorted(raw_dir.glob("*_stats.csv"))
+    if matches:
+        return matches[0]
+    return None
+
+
+def _find_failures_csv(raw_dir: Path) -> Optional[Path]:
+    preferred = raw_dir / "locust_failures.csv"
+    if preferred.exists():
+        return preferred
+    matches = sorted(raw_dir.glob("*_failures.csv"))
+    if matches:
+        return matches[0]
+    return None
+
+
+def find_stats_history_csv(raw_dir: Path) -> Optional[Path]:
+    preferred = raw_dir / "locust_stats_history.csv"
+    if preferred.exists():
+        return preferred
+    matches = sorted(raw_dir.glob("*_stats_history.csv"))
     if matches:
         return matches[0]
     return None
@@ -97,6 +120,123 @@ def parse_locust_stats(path: Path) -> Dict[str, Any]:
     }
 
     return metrics
+
+
+def _extract_status_code(text: str) -> Optional[int]:
+    if not text:
+        return None
+    match = _STATUS_RE.search(text)
+    if not match:
+        return None
+    try:
+        code = int(match.group(1))
+    except ValueError:
+        return None
+    if 100 <= code <= 599:
+        return code
+    return None
+
+
+def parse_locust_failures(path: Path) -> Dict[str, Any]:
+    with path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        rows = list(reader)
+    if not rows:
+        return {}
+
+    norm_map = {_normalize_key(key): key for key in rows[0].keys()}
+
+    def fetch(row: Dict[str, str], *candidates: str) -> Optional[str]:
+        for cand in candidates:
+            key = norm_map.get(_normalize_key(cand))
+            if key is not None:
+                return row.get(key)
+        return None
+
+    failures_4xx = 0
+    failures_5xx = 0
+    failures_503 = 0
+    failures_other = 0
+
+    for row in rows:
+        error_text = fetch(row, "Error", "Error Type", "Exception", "Message") or ""
+        occurrences = _safe_int(fetch(row, "Occurrences", "Count", "Number"))
+        if occurrences is None or occurrences <= 0:
+            occurrences = 1
+
+        status = _extract_status_code(error_text)
+        if status is None:
+            failures_other += occurrences
+            continue
+        if 400 <= status < 500:
+            failures_4xx += occurrences
+        if 500 <= status < 600:
+            failures_5xx += occurrences
+        if status == 503:
+            failures_503 += occurrences
+
+    return {
+        "failures_4xx": failures_4xx,
+        "failures_5xx": failures_5xx,
+        "failures_503": failures_503,
+        "failures_other": failures_other,
+    }
+
+
+def parse_locust_stats_history(path: Path) -> List[Dict[str, Any]]:
+    with path.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        rows = list(reader)
+    if not rows:
+        return []
+
+    norm_map = {_normalize_key(key): key for key in rows[0].keys()}
+
+    def fetch(row: Dict[str, str], *candidates: str) -> Optional[str]:
+        for cand in candidates:
+            key = norm_map.get(_normalize_key(cand))
+            if key is not None:
+                return row.get(key)
+        return None
+
+    history: List[Dict[str, Any]] = []
+    for row in rows:
+        timestamp = _safe_float(fetch(row, "Timestamp", "Time", "Epoch"))
+        rps = _safe_float(fetch(row, "Requests/s", "Total RPS", "Total Requests/s", "RPS"))
+        failures_s = _safe_float(fetch(row, "Failures/s", "Total Failures/s", "Failure/s"))
+        history.append(
+            {
+                "timestamp": timestamp,
+                "rps": rps,
+                "failures_s": failures_s,
+            }
+        )
+    return history
+
+
+def _apply_failure_rates(metrics: Dict[str, Any], breakdown: Dict[str, Any]) -> None:
+    requests = _safe_float(metrics.get("requests"))
+    if not requests:
+        return
+
+    def rate(count: Optional[int]) -> Optional[float]:
+        if count is None:
+            return None
+        return count / requests * 100
+
+    failures_4xx = breakdown.get("failures_4xx")
+    failures_5xx = breakdown.get("failures_5xx")
+    failures_503 = breakdown.get("failures_503")
+
+    metrics["error_rate_4xx"] = rate(failures_4xx)
+    metrics["error_rate_5xx"] = rate(failures_5xx)
+    metrics["error_rate_503"] = rate(failures_503)
+
+    failures_total = _safe_int(metrics.get("failures"))
+    if failures_total is not None and failures_503 is not None:
+        failures_non_503 = max(0, failures_total - failures_503)
+        metrics["failures_non_503"] = failures_non_503
+        metrics["error_rate_non_503"] = rate(failures_non_503)
 
 
 class LocustLauncher:
@@ -164,6 +304,12 @@ class LocustLauncher:
         metrics: Dict[str, Any] = {}
         if stats_path:
             metrics = parse_locust_stats(stats_path)
+            failures_path = _find_failures_csv(raw_dir)
+            if failures_path:
+                breakdown = parse_locust_failures(failures_path)
+                if breakdown:
+                    metrics.update(breakdown)
+                    _apply_failure_rates(metrics, breakdown)
             self.storage.save_json(self.storage.metrics_path(self.run_id), metrics)
 
         run_meta = {

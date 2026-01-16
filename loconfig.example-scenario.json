@@ -73,6 +73,24 @@
     "run_id": "${GITHUB_SHA:-local}"
   },
   "analysis": {
+    "mode": "resilience",
+    "gate": {
+      "min_requests": 200,
+      "thresholds": {
+        "error_rate_non_503": {
+          "fail": 2
+        },
+        "error_rate_503": {
+          "fail": 5
+        },
+        "p95_ms": {
+          "fail": 500
+        },
+        "p99_ms": {
+          "fail": 800
+        }
+      }
+    },
     "rules": [
       {
         "metric": "p95_ms",

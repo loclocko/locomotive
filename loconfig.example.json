@@ -14,6 +14,15 @@
     "run_id": "${GITHUB_SHA}"
   },
   "analysis": {
+    "mode": "acceptance",
+    "gate": {
+      "min_requests": 100,
+      "thresholds": {
+        "error_rate": {
+          "fail": 0
+        }
+      }
+    },
     "rules_file": "rules.json",
     "fail_on": "DEGRADATION"
   },

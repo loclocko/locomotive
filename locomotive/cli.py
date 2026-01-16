@@ -8,9 +8,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .analyzer import analyze as analyze_metrics
-from .analyzer import load_rules
+from .analyzer import load_rules, merge_results
 from .config import load_config
-from .launcher import LocustLauncher
+from .gate import evaluate_gate, summarize_history
+from .launcher import LocustLauncher, find_stats_history_csv, parse_locust_stats_history
 from .reporter import render_report
 from .scenario import generate_locustfile
 from .storage import Storage
@@ -23,6 +24,37 @@ DEFAULT_CONFIG = "loconfig.json"
 def _get_section(config: Dict[str, Any], name: str) -> Dict[str, Any]:
     value = config.get(name)
     return value if isinstance(value, dict) else {}
+
+
+def _normalize_mode(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip().lower()
+    if text in {"resilience", "acceptance"}:
+        return text
+    return ""
+
+
+def _resolve_gate_config(analysis_cfg: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
+    gate_cfg = _get_section(analysis_cfg, "gate")
+    mode = _normalize_mode(analysis_cfg.get("mode") or gate_cfg.get("mode"))
+    thresholds = gate_cfg.get("thresholds")
+    has_thresholds = isinstance(thresholds, dict) and bool(thresholds)
+    if not mode and has_thresholds:
+        mode = "resilience"
+    if mode == "resilience" and not has_thresholds:
+        mode = ""
+    return mode, gate_cfg
+
+
+def _load_history_summary(storage: Storage, run_id: str, warmup_seconds: Optional[int]) -> Optional[Dict[str, float]]:
+    if not warmup_seconds:
+        return None
+    history_path = find_stats_history_csv(storage.raw_dir(run_id))
+    if not history_path:
+        return None
+    history = parse_locust_stats_history(history_path)
+    return summarize_history(history, warmup_seconds)
 
 
 def _parse_list(value: Any) -> List[str]:
@@ -147,14 +179,19 @@ def _analyze(
     baseline_id: str,
     rules_path: Optional[str],
     inline_rules: Optional[List[Dict[str, Any]]],
+    save: bool = True,
 ) -> Dict[str, Any]:
     current_metrics = storage.load_json(storage.metrics_path(run_id))
-    baseline_metrics = storage.load_json(storage.metrics_path(baseline_id))
+    baseline_metrics = {}
+    baseline_path = storage.metrics_path(baseline_id)
+    if baseline_path.exists():
+        baseline_metrics = storage.load_json(baseline_path)
     rules = _load_rules_from_sources(rules_path, inline_rules)
     analysis = analyze_metrics(current_metrics, baseline_metrics, rules)
     analysis["run_id"] = run_id
     analysis["baseline_id"] = baseline_id
-    storage.save_json(storage.analysis_path(run_id), analysis)
+    if save:
+        storage.save_json(storage.analysis_path(run_id), analysis)
     return analysis
 
 
@@ -256,16 +293,42 @@ def cmd_analyze(args: argparse.Namespace, config: Dict[str, Any]) -> int:
     run_id = _build_run_id(args, config)
 
     analysis_cfg = _get_section(config, "analysis")
+    mode, gate_cfg = _resolve_gate_config(analysis_cfg)
     baseline_id = args.baseline or analysis_cfg.get("baseline") or storage.get_baseline()
-    if not baseline_id:
+    if not baseline_id and not mode:
         raise ValueError("baseline run id is required")
 
     rules_path = args.rules or analysis_cfg.get("rules_file")
     inline_rules = analysis_cfg.get("rules")
 
-    analysis = _analyze(storage, run_id, baseline_id, rules_path, inline_rules)
-    fail_on = args.fail_on or analysis_cfg.get("fail_on") or "DEGRADATION"
-    return _exit_code_for_status(analysis.get("status"), fail_on)
+    result_sets: List[List[Dict[str, Any]]] = []
+    baseline_results = None
+    if baseline_id:
+        baseline_results = _analyze(storage, run_id, baseline_id, rules_path, inline_rules, save=False)
+        result_sets.append(baseline_results.get("results") or [])
+
+    gate_eval = None
+    if mode:
+        current_metrics = storage.load_json(storage.metrics_path(run_id))
+        warmup_seconds = gate_cfg.get("warmup_seconds")
+        history_summary = _load_history_summary(storage, run_id, _parse_int(warmup_seconds, "warmup_seconds") if warmup_seconds is not None else None)
+        gate_eval = evaluate_gate(current_metrics, gate_cfg, mode, history_summary)
+        if gate_eval:
+            result_sets.append(gate_eval.get("results") or [])
+
+    if result_sets:
+        combined = merge_results(result_sets)
+        combined["run_id"] = run_id
+        if baseline_id:
+            combined["baseline_id"] = baseline_id
+        if gate_eval:
+            combined["gate"] = gate_eval.get("gate")
+        storage.save_json(storage.analysis_path(run_id), combined)
+
+        fail_on = args.fail_on or analysis_cfg.get("fail_on") or "DEGRADATION"
+        return _exit_code_for_status(combined.get("status"), fail_on)
+
+    return 0
 
 
 def cmd_report(args: argparse.Namespace, config: Dict[str, Any]) -> int:
@@ -296,22 +359,50 @@ def cmd_ci(args: argparse.Namespace, config: Dict[str, Any]) -> int:
 
     analysis_cfg = _get_section(config, "analysis")
     report_cfg = _get_section(config, "report")
+    mode, gate_cfg = _resolve_gate_config(analysis_cfg)
     baseline_id = args.baseline or analysis_cfg.get("baseline") or storage.get_baseline()
 
+    metrics_path = storage.metrics_path(run_id)
+    metrics_exist = metrics_path.exists()
     analysis = None
-    if baseline_id and storage.metrics_path(run_id).exists():
+    result_sets: List[List[Dict[str, Any]]] = []
+    baseline_results = None
+
+    if baseline_id and metrics_exist:
         rules_path = args.rules or analysis_cfg.get("rules_file")
         inline_rules = analysis_cfg.get("rules")
-        analysis = _analyze(storage, run_id, baseline_id, rules_path, inline_rules)
+        baseline_results = _analyze(storage, run_id, baseline_id, rules_path, inline_rules, save=False)
+        result_sets.append(baseline_results.get("results") or [])
     else:
         baseline_id = None
+
+    gate_eval = None
+    if mode and metrics_exist:
+        current_metrics = storage.load_json(metrics_path)
+        warmup_seconds = gate_cfg.get("warmup_seconds")
+        history_summary = _load_history_summary(storage, run_id, _parse_int(warmup_seconds, "warmup_seconds") if warmup_seconds is not None else None)
+        gate_eval = evaluate_gate(current_metrics, gate_cfg, mode, history_summary)
+        if gate_eval:
+            result_sets.append(gate_eval.get("results") or [])
+
+    if result_sets:
+        combined = merge_results(result_sets)
+        combined["run_id"] = run_id
+        if baseline_id:
+            combined["baseline_id"] = baseline_id
+        if gate_eval:
+            combined["gate"] = gate_eval.get("gate")
+        storage.save_json(storage.analysis_path(run_id), combined)
+        analysis = combined
 
     title = args.title or report_cfg.get("title") or "CI Load Test Report"
     output_path = args.output or report_cfg.get("output")
     _report(storage, run_id, baseline_id, title, output_path)
 
     locust_code = int(run_result.get("returncode") or 0)
-    if locust_code != 0:
+    if not metrics_exist:
+        return locust_code or 1
+    if locust_code != 0 and not mode:
         return locust_code
 
     if analysis:

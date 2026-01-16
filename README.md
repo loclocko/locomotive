@@ -66,6 +66,13 @@ loco init --github-workflow
     ]
   },
   "analysis": {
+    "mode": "acceptance",
+    "gate": {
+      "min_requests": 100,
+      "thresholds": {
+        "error_rate": {"fail": 0}
+      }
+    },
     "rules": [
       {"metric": "p95_ms", "mode": "relative", "direction": "increase", "warn": 10, "fail": 25},
       {"metric": "error_rate", "mode": "absolute", "direction": "increase", "warn": 1, "fail": 5}
@@ -173,6 +180,8 @@ loco ci --config loconfig.json --set-baseline
 
 ## Правила анализа
 
+Правила ниже сравнивают метрики текущего прогона с baseline.
+
 ```json
 {
   "analysis": {
@@ -197,6 +206,60 @@ loco ci --config loconfig.json --set-baseline
 | `direction` | `increase` (больше = хуже) или `decrease` (меньше = хуже) |
 | `warn` / `fail` | Пороги для WARNING и DEGRADATION |
 | `fail_on` | При каком статусе возвращать exit code 1 |
+
+## Режимы проверки (gate)
+
+Gate-проверки работают без baseline и применяются к метрикам текущего прогона.
+
+### Resilience / capacity
+
+```json
+{
+  "analysis": {
+    "mode": "resilience",
+    "gate": {
+      "min_requests": 200,
+      "thresholds": {
+        "error_rate_non_503": {"fail": 2},
+        "error_rate_503": {"fail": 5},
+        "p95_ms": {"fail": 500},
+        "p99_ms": {"fail": 800}
+      }
+    }
+  }
+}
+```
+
+### Acceptance / NFR compliance
+
+```json
+{
+  "analysis": {
+    "mode": "acceptance",
+    "gate": {
+      "min_requests": 100,
+      "warmup_seconds": 10,
+      "thresholds": {
+        "error_rate": {"fail": 0},
+        "failures": {"fail": 3}
+      }
+    }
+  }
+}
+```
+
+| Параметр | Описание |
+|----------|----------|
+| `mode` | `acceptance` (строго) или `resilience` (порог ошибок) |
+| `gate.thresholds` | Пороговые проверки для метрик текущего прогона |
+| `gate.min_requests` | Минимум запросов для применения gate |
+| `gate.warmup_seconds` | Секунды warmup, игнорируются в расчёте ошибок |
+
+В режиме `resilience` для error-метрик `warn` по умолчанию равен 0, поэтому любые ошибки ниже `fail` дают WARNING.
+
+Дополнительно считаются метрики `error_rate_503`, `error_rate_4xx`, `error_rate_5xx`, `failures_503`, `failures_4xx`, `failures_5xx` и `error_rate_non_503` (всё кроме 503).
+
+Если `mode` задан и метрики сохранены, код возврата определяется gate/analysis, а не выходным кодом Locust.
 
 ## GitHub Actions
 

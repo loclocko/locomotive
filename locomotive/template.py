@@ -179,6 +179,16 @@ def generate_template(
             "run_id": "${GITHUB_SHA:-local}"
         },
         "analysis": {
+            "mode": "acceptance",
+            "gate": {
+                "min_requests": 100,
+                "thresholds": {
+                    "error_rate": {
+                        "fail": 0,
+                        "_comment": "Acceptance mode: fail on any error by default."
+                    }
+                }
+            },
             "rules": [
                 {
                     "metric": "p95_ms",

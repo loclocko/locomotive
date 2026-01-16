@@ -144,3 +144,30 @@ def analyze(current: Dict[str, Any], baseline: Dict[str, Any], rules: List[Rule]
         "summary": summary,
         "results": results,
     }
+
+
+def merge_results(result_sets: List[List[Dict[str, Any]]]) -> Dict[str, Any]:
+    results: List[Dict[str, Any]] = []
+    for items in result_sets:
+        if items:
+            results.extend(items)
+
+    worst = "PASS"
+    for res in results:
+        status = res.get("status")
+        if status in STATUS_SEVERITY and STATUS_SEVERITY[status] > STATUS_SEVERITY[worst]:
+            worst = status
+
+    summary = {
+        "PASS": sum(1 for res in results if res.get("status") == "PASS"),
+        "WARNING": sum(1 for res in results if res.get("status") == "WARNING"),
+        "DEGRADATION": sum(1 for res in results if res.get("status") == "DEGRADATION"),
+        "SKIP": sum(1 for res in results if res.get("status") == "SKIP"),
+    }
+
+    return {
+        "status": worst,
+        "evaluated_at": utc_now(),
+        "summary": summary,
+        "results": results,
+    }
