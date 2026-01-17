@@ -117,11 +117,12 @@ runs:
       uses: dawidd6/action-download-artifact@v6
       continue-on-error: true
       with:
+        github_token: ${{ inputs.github_token || github.token }}
+        workflow: ci.yml
         name: ${{ inputs.baseline_artifact }}
         path: loadtest-artifacts/
-        workflow: ${{ github.workflow }}
         workflow_conclusion: ""
-        search_artifacts: true
+        check_artifacts: true
         if_no_artifact_found: warn
 
     - name: Run load test
