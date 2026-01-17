@@ -12,7 +12,7 @@ from .analyzer import load_rules, merge_results
 from .config import load_config
 from .gate import evaluate_gate, summarize_history
 from .launcher import LocustLauncher, find_stats_history_csv, parse_locust_stats_history
-from .reporter import render_report
+from .reporter import render_report, load_stats_history, load_endpoint_stats
 from .scenario import generate_locustfile
 from .storage import Storage
 from .template import generate_template, generate_github_workflow
@@ -226,7 +226,22 @@ def _report(
     if analysis_path.exists():
         analysis = storage.load_json(analysis_path)
 
-    html = render_report(run_meta, current_metrics, baseline_metrics, analysis, title)
+    # Load stats history and endpoint stats for enhanced report
+    run_dir = storage.run_dir(run_id)
+    raw_dir = run_dir / "raw"
+
+    stats_history = load_stats_history(raw_dir / "locust_stats_history.csv")
+    endpoint_stats = load_endpoint_stats(raw_dir / "locust_stats.csv")
+
+    html = render_report(
+        run_meta,
+        current_metrics,
+        baseline_metrics,
+        analysis,
+        title,
+        stats_history=stats_history,
+        endpoint_stats=endpoint_stats,
+    )
 
     if output_path:
         output = Path(output_path)
