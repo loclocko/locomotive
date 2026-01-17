@@ -114,13 +114,15 @@ runs:
         python3 -m pip show locomotive | grep -E "Name|Version" || true
 
     - name: Download baseline
-      uses: actions/download-artifact@v4
+      uses: dawidd6/action-download-artifact@v6
       continue-on-error: true
       with:
         name: ${{ inputs.baseline_artifact }}
         path: loadtest-artifacts/
-      env:
-        ACTIONS_STEP_DEBUG: false
+        workflow: ${{ github.workflow }}
+        workflow_conclusion: ""
+        search_artifacts: true
+        if_no_artifact_found: warn
 
     - name: Run load test
       id: run
