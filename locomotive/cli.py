@@ -396,7 +396,20 @@ def cmd_ci(args: argparse.Namespace, config: Dict[str, Any]) -> int:
     set_baseline = False
     if args.set_baseline and metrics_exist:
         if analysis:
-            set_baseline = analysis.get("status") == "PASS"
+            # In resilience mode, set baseline if gate checks passed (ignoring locust returncode)
+            # because some level of errors (503) is expected under load
+            # In acceptance mode (or when no mode), only set baseline on PASS
+            if mode == "resilience":
+                # Check if all gate metrics passed (no DEGRADATION from fail thresholds)
+                gate_status = None
+                if gate_eval and gate_eval.get("results"):
+                    gate_results = gate_eval.get("results", [])
+                    gate_statuses = [r.get("status") for r in gate_results]
+                    # Set baseline only if no gate metrics failed completely
+                    gate_status = "PASS" if all(s in ("PASS", "WARNING", "SKIP") for s in gate_statuses) else "DEGRADATION"
+                set_baseline = gate_status == "PASS" if gate_status else locust_code == 0
+            else:
+                set_baseline = analysis.get("status") == "PASS"
         else:
             set_baseline = locust_code == 0
     if set_baseline:

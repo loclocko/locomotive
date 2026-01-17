@@ -129,9 +129,11 @@ def _evaluate_threshold(
             result["status"] = "WARNING"
         return result
 
-    if fail is not None and current >= fail:
+    # For "increase" direction, use strict inequality (>) to avoid false positives
+    # when current value equals threshold (e.g., error_rate_non_503 = 0 with fail = 0)
+    if fail is not None and current > fail:
         result["status"] = "DEGRADATION"
-    elif warn is not None and current >= warn:
+    elif warn is not None and current > warn:
         result["status"] = "WARNING"
     return result
 
