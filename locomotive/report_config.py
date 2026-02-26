@@ -297,10 +297,17 @@ def _make_datasets(raw: List[Dict[str, Any]]) -> List[ChartDatasetConfig]:
     ]
 
 
+_KNOWN_CHARTS = {"throughput", "response_time"}
+
+
 def _make_charts(raw: Dict[str, Any]) -> Dict[str, ChartConfig]:
     result: Dict[str, ChartConfig] = {}
     for name, cfg in raw.items():
         if not isinstance(cfg, dict):
+            continue
+        # Skip entries that are clearly not chart configs (e.g. misplaced
+        # endpoint_table or kpi blocks nested under "charts" by mistake).
+        if name not in _KNOWN_CHARTS and "datasets" not in cfg:
             continue
         result[name] = ChartConfig(
             enabled=bool(cfg.get("enabled", True)),
@@ -336,6 +343,12 @@ def resolve_report_config(raw: Dict[str, Any]) -> ReportConfig:
         merged = _deep_merge(merged, PRESETS[preset_name])
 
     overlay = {k: v for k, v in raw.items() if k not in ("preset",) and v is not None}
+    # Rescue misplaced keys: users sometimes nest kpi/endpoint_table inside charts
+    charts_overlay = overlay.get("charts")
+    if isinstance(charts_overlay, dict):
+        for misplaced in ("kpi", "endpoint_table"):
+            if misplaced in charts_overlay and misplaced not in overlay:
+                overlay[misplaced] = charts_overlay.pop(misplaced)
     merged = _deep_merge(merged, overlay)
 
     theme_raw = merged.get("theme", {})
