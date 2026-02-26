@@ -6,48 +6,48 @@ inputs:
     description: 'Path to loconfig config file'
     required: false
     default: 'loconfig.json'
-  
+
   lib_repo:
     description: 'Repository of Locomotive library (owner/repo)'
     required: true
-  
+
   lib_token:
     description: 'GitHub PAT token for accessing private lib repo (required for private repos)'
     required: false
-  
+
   lib_ref:
     description: 'Git ref (branch/tag) to checkout from lib repo'
     required: false
     default: 'master'
-  
+
   users:
     description: 'Override number of users'
     required: false
-  
+
   run_time:
     description: 'Override run time (e.g., 30s, 1m)'
     required: false
-  
+
   set_baseline:
     description: 'Set this run as baseline and upload artifact'
     required: false
     default: 'true'
-  
+
   baseline_artifact:
     description: 'Name of baseline artifact to download/upload'
     required: false
     default: 'loadtest-baseline'
-  
+
   results_artifact:
     description: 'Name of results artifact to upload'
     required: false
     default: 'loadtest-results'
-  
+
   post_pr_comment:
     description: 'Post results as comment to PR'
     required: false
     default: 'true'
-  
+
   github_token:
     description: 'GitHub token for posting PR comments (uses github.token if not provided)'
     required: false
@@ -56,11 +56,11 @@ outputs:
   metrics_path:
     description: 'Path to metrics.json file'
     value: ${{ steps.run.outputs.metrics_path }}
-  
+
   report_path:
     description: 'Path to report.html file'
     value: ${{ steps.run.outputs.report_path }}
-  
+
   status:
     description: 'Test status (PASS/WARNING/DEGRADATION)'
     value: ${{ steps.run.outputs.status }}
@@ -98,10 +98,10 @@ runs:
           echo "      python-version: '3.9'"
           exit 1
         fi
-        
+
         python3 -m pip install --quiet --upgrade pip
         python3 -m pip install --quiet locust PyYAML
-        
+
         # Install locomotive from local checkout
         if [ ! -d "locomotive" ]; then
           echo "Error: locomotive directory not found!"
@@ -109,7 +109,7 @@ runs:
         fi
         echo "Installing locomotive..."
         python3 -m pip install --quiet ./locomotive
-        
+
         echo "✓ Installed:"
         python3 -m pip show locomotive | grep -E "Name|Version" || true
 
@@ -125,56 +125,88 @@ runs:
         check_artifacts: true
         if_no_artifact_found: warn
 
+    - name: Sync storage path
+      shell: bash
+      run: |
+        # Read artifacts.storage from config and create symlink if it differs
+        # from the download path. This ensures loco reads/writes through
+        # loadtest-artifacts/ regardless of what the config says.
+        STORAGE_DIR=$(python3 -c "
+        import json, os, re
+        cfg_path = '${{ inputs.config }}'
+        ext = os.path.splitext(cfg_path)[1].lower()
+        with open(cfg_path) as f:
+            if ext in ('.yml', '.yaml'):
+                import yaml; cfg = yaml.safe_load(f) or {}
+            else:
+                cfg = json.load(f)
+        raw = str(cfg.get('artifacts', {}).get('storage', 'loadtest-artifacts'))
+        resolved = re.sub(r'\\\$\{(\w+)(?::-([^}]*))?\}', lambda m: os.environ.get(m.group(1), m.group(2) or ''), raw)
+        print(resolved)
+        " 2>/dev/null || echo "loadtest-artifacts")
+
+        echo "Config storage: $STORAGE_DIR"
+
+        if [ "$STORAGE_DIR" != "loadtest-artifacts" ] && [ ! -e "$STORAGE_DIR" ]; then
+          ln -s "$(pwd)/loadtest-artifacts" "$STORAGE_DIR"
+          echo "✓ Created symlink: $STORAGE_DIR -> loadtest-artifacts"
+        else
+          echo "✓ Storage path matches download path"
+        fi
+
     - name: Run load test
       id: run
       shell: bash
       run: |
         echo "=== Running Load Test ==="
-        
+
         # Build command - --config must come before subcommand
         CMD="loco --config ${{ inputs.config }} ci"
-        
+
         if [ -n "${{ inputs.users }}" ]; then
           CMD="$CMD --users ${{ inputs.users }}"
         fi
-        
+
         if [ -n "${{ inputs.run_time }}" ]; then
           CMD="$CMD --run-time ${{ inputs.run_time }}"
         fi
-        
+
         if [ "${{ inputs.set_baseline }}" == "true" ]; then
           CMD="$CMD --set-baseline"
         fi
-        
+
         echo "Command: $CMD"
         $CMD || EXIT_CODE=$?
-        
-        # Find metrics and report paths
+
+        echo ""
+        echo "=== Exit code: ${EXIT_CODE:-0} ==="
+
+        # Find metrics and report paths (always in loadtest-artifacts via symlink)
         ARTIFACTS_DIR="loadtest-artifacts/runs"
         if [ -d "$ARTIFACTS_DIR" ]; then
           RUN_DIR=$(ls -td "$ARTIFACTS_DIR"/*/ 2>/dev/null | head -1)
           if [ -n "$RUN_DIR" ]; then
             METRICS_PATH="$RUN_DIR/metrics.json"
             REPORT_PATH="$RUN_DIR/report.html"
-            
+
             if [ -f "$METRICS_PATH" ]; then
               echo "metrics_path=$METRICS_PATH" >> $GITHUB_OUTPUT
               echo "report_path=$REPORT_PATH" >> $GITHUB_OUTPUT
-              
+
               # Extract status from analysis if exists
               ANALYSIS_PATH="$RUN_DIR/analysis.json"
               if [ -f "$ANALYSIS_PATH" ]; then
                 STATUS=$(python3 -c "import json; print(json.load(open('$ANALYSIS_PATH')).get('status', 'UNKNOWN'))" 2>/dev/null || echo "UNKNOWN")
                 echo "status=$STATUS" >> $GITHUB_OUTPUT
               fi
-              
+
               echo ""
               echo "=== Metrics ==="
               cat "$METRICS_PATH" | python3 -m json.tool || cat "$METRICS_PATH"
             fi
           fi
         fi
-        
+
         exit ${EXIT_CODE:-0}
       env:
         GITHUB_SHA: ${{ github.sha }}
@@ -226,43 +258,43 @@ runs:
         script: |
           const fs = require('fs');
           const path = require('path');
-          
+
           const artifactsDir = 'loadtest-artifacts/runs';
           if (!fs.existsSync(artifactsDir)) {
             console.log('No artifacts found, skipping comment');
             return;
           }
-          
+
           const runs = fs.readdirSync(artifactsDir)
             .map(run => path.join(artifactsDir, run))
             .filter(run => fs.statSync(run).isDirectory())
             .sort((a, b) => fs.statSync(b).mtime - fs.statSync(a).mtime);
-          
+
           if (runs.length === 0) {
             console.log('No runs found, skipping comment');
             return;
           }
-          
+
           const metricsPath = path.join(runs[0], 'metrics.json');
           if (!fs.existsSync(metricsPath)) {
             console.log('No metrics found, skipping comment');
             return;
           }
-          
+
           const metrics = JSON.parse(fs.readFileSync(metricsPath, 'utf8'));
           const analysisPath = path.join(runs[0], 'analysis.json');
-          
+
           const fmt = (val) => val == null ? 'N/A' : typeof val === 'number' ? val.toFixed(2) : String(val);
-          
+
           const rps = fmt(metrics.rps);
           const avgMs = fmt(metrics.avg_ms);
           const p95Ms = fmt(metrics.p95_ms);
           const errorRate = fmt(metrics.error_rate);
           const requests = metrics.requests || 'N/A';
-          
+
           let statusEmoji = '⚪';
           let statusText = 'Unknown';
-          
+
           if (fs.existsSync(analysisPath)) {
             const analysis = JSON.parse(fs.readFileSync(analysisPath, 'utf8'));
             const status = analysis.status || 'UNKNOWN';
@@ -288,10 +320,10 @@ runs:
               statusText = 'Failed';
             }
           }
-          
+
           const runId = process.env.GITHUB_RUN_ID || 'unknown';
           const body = [
-            `## 🚀 Load Test Results ${statusEmoji} ${statusText}`,
+            `## Load Test Results ${statusEmoji} ${statusText}`,
             '',
             '| Metric | Value |',
             '|--------|-------|',
@@ -303,7 +335,7 @@ runs:
             '',
             `[View full report](../actions/runs/${runId})`
           ].join('\n');
-          
+
           github.rest.issues.createComment({
             issue_number: context.issue.number,
             owner: context.repo.owner,
