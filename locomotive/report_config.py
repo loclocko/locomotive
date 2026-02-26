@@ -339,9 +339,13 @@ def resolve_report_config(raw: Dict[str, Any]) -> ReportConfig:
     merged = _deep_merge(merged, overlay)
 
     theme_raw = merged.get("theme", {})
+    theme_colors = {k: v for k, v in (theme_raw.get("colors") or {}).items() if not k.startswith("_")}
+    # theme.color is a shortcut for theme.colors.primary
+    if "color" in theme_raw and "primary" not in theme_colors:
+        theme_colors["primary"] = theme_raw["color"]
     theme = ThemeConfig(
         mode=theme_raw.get("mode", "light"),
-        colors={k: v for k, v in (theme_raw.get("colors") or {}).items() if not k.startswith("_")},
+        colors=theme_colors,
     )
 
     br = merged.get("branding", {})
