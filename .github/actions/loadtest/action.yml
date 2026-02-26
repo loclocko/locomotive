@@ -196,11 +196,7 @@ runs:
           echo "No baseline.json found, skipping trim"
           exit 0
         fi
-        BASELINE_RUN=$(python3 -c "
-import json
-data = json.load(open('$BASELINE_FILE'))
-print(data.get('run_id', ''))
-" 2>/dev/null || echo "")
+        BASELINE_RUN=$(python3 -c "import json; print(json.load(open('$BASELINE_FILE')).get('run_id',''))" 2>/dev/null || echo "")
         if [ -z "$BASELINE_RUN" ]; then
           echo "Could not determine baseline run_id, skipping trim"
           exit 0
