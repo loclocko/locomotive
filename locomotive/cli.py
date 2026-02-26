@@ -432,19 +432,12 @@ def cmd_ci(args: argparse.Namespace, config: Dict[str, Any]) -> int:
     locust_code = int(run_result.get("returncode") or 0)
     set_baseline = False
     if args.set_baseline and metrics_exist:
-        if analysis:
-            # In resilience mode, set baseline if gate checks passed (ignoring locust returncode)
-            # because some level of errors (503) is expected under load
-            # In acceptance mode (or when no mode), only set baseline on PASS
-            if mode == "resilience":
-                # In resilience mode, gate results determine baseline eligibility
-                # (regression rules are informational only)
-                if gate_eval:
-                    set_baseline = _gate_status(gate_eval) in ("PASS", "WARNING")
-                else:
-                    set_baseline = locust_code == 0
-            else:
-                set_baseline = analysis.get("status") == "PASS"
+        if gate_eval:
+            # When gate is configured, use gate status for baseline eligibility.
+            # Regression rules may fluctuate between runs and should not block baseline.
+            set_baseline = _gate_status(gate_eval) in ("PASS", "WARNING")
+        elif analysis:
+            set_baseline = analysis.get("status") == "PASS"
         else:
             set_baseline = locust_code == 0
     if set_baseline:
@@ -467,16 +460,18 @@ def cmd_ci(args: argparse.Namespace, config: Dict[str, Any]) -> int:
 
     if not metrics_exist:
         return locust_code or 1
-    if locust_code != 0 and not mode:
-        return locust_code
 
     if analysis:
         fail_on = args.fail_on or analysis_cfg.get("fail_on") or "DEGRADATION"
-        # In resilience mode, gate results determine exit code;
-        # regression rules are informational (shown in report but don't fail the build)
-        if mode == "resilience" and gate_eval:
+        # When gate is configured, use gate status for exit code.
+        # Regression rules are shown in the report but do not fail the build
+        # — they compare against baseline which can vary between runs.
+        if gate_eval:
             return _exit_code_for_status(_gate_status(gate_eval), fail_on)
         return _exit_code_for_status(analysis.get("status"), fail_on)
+
+    if locust_code != 0:
+        return locust_code
     return 0
 
 

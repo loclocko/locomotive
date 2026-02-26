@@ -181,13 +181,13 @@ def generate_template(
             "_comment_history": "Number of recent runs to keep in history.json for trend charts (0 = disabled)"
         },
         "analysis": {
-            "mode": "acceptance",
+            "mode": "resilience",
             "gate": {
                 "min_requests": 100,
                 "thresholds": {
                     "error_rate": {
-                        "fail": 0,
-                        "_comment": "Acceptance mode: fail on any error by default."
+                        "fail": 5,
+                        "_comment": "Fail if error rate exceeds 5%"
                     }
                 }
             },

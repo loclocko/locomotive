@@ -14,12 +14,12 @@
     "run_id": "${GITHUB_SHA}"
   },
   "analysis": {
-    "mode": "acceptance",
+    "mode": "resilience",
     "gate": {
       "min_requests": 100,
       "thresholds": {
         "error_rate": {
-          "fail": 0
+          "fail": 5
         }
       }
     },
