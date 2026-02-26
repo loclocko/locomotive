@@ -73,6 +73,7 @@ class ReportConfig:
     charts: Dict[str, ChartConfig] = field(default_factory=dict)
     endpoint_columns: List[EndpointColumnConfig] = field(default_factory=list)
     trends: TrendsConfig = field(default_factory=TrendsConfig)
+    timezone: str = "UTC"
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +262,7 @@ def _build_default_raw() -> Dict[str, Any]:
         },
         "endpoint_table": {"columns": copy.deepcopy(_DEFAULT_ENDPOINT_COLUMNS)},
         "trends": {"metrics": ["p95_ms", "rps", "error_rate"]},
+        "timezone": "UTC",
     }
 
 
@@ -371,4 +373,5 @@ def resolve_report_config(raw: Dict[str, Any]) -> ReportConfig:
         charts=charts,
         endpoint_columns=ep_columns,
         trends=trends,
+        timezone=merged.get("timezone", "UTC"),
     )

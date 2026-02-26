@@ -229,10 +229,12 @@ def generate_template(
             },
             "branding": {
                 "name": "Locomotive",
-                "_comment_name": "Company/project name shown in footer. Set 'color' to override accent color."
+                "_comment_name": "Company/project name shown in footer. Set 'color' to change brand name color."
             },
             "sections": ["kpi", "charts", "regression", "endpoints", "trends"],
             "_comment_sections": "Controls which sections appear and in what order. Remove to hide.",
+            "timezone": "UTC",
+            "_comment_timezone": "Timezone for dates in report. Examples: 'UTC', 'UTC+3', 'UTC-5:30'",
             "trends": {
                 "metrics": ["p95_ms", "rps", "error_rate"],
                 "_comment": "Metrics to show on trend charts. Requires artifacts.history > 0."

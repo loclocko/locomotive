@@ -199,7 +199,7 @@ class ReportRenderer:
         self.history_runs = history_runs or []
 
         self.status = (analysis.get("status", "PASS") if analysis else "PASS")
-        self.generated_at = utc_now()
+        self.generated_at = self._format_datetime(utc_now())
         self.chart_data = _build_chart_data(self.stats_history)
         self.has_charts = len(self.stats_history) > 2
 
@@ -334,7 +334,7 @@ class ReportRenderer:
       font-size: 11px; font-weight: 600; text-transform: uppercase;
       letter-spacing: 0.05em; color: var(--text-muted); background: var(--bg);
     }
-    td.num { text-align: right; font-family: monospace; }
+    td.num, th.num { text-align: right; font-family: monospace; }
     tr:hover { background: var(--bg); }
     .endpoint-name { font-weight: 500; }
 
@@ -379,17 +379,19 @@ class ReportRenderer:
         return "\n".join(lines)
 
     def _css_user_overrides(self) -> str:
-        colors: Dict[str, str] = {}
-        if self.cfg.branding.color:
-            colors["primary"] = self.cfg.branding.color
-        colors.update(self.cfg.theme.colors)  # theme.colors takes priority
-        if not colors:
+        colors: Dict[str, str] = dict(self.cfg.theme.colors)
+        if not colors and not self.cfg.branding.color:
             return ""
-        lines = ["    :root {"]
-        for var, val in colors.items():
-            lines.append(f"      --{var}: {val};")
-        lines.append("    }")
-        return "\n".join(lines)
+        parts: List[str] = []
+        if colors:
+            lines = ["    :root {"]
+            for var, val in colors.items():
+                lines.append(f"      --{var}: {val};")
+            lines.append("    }")
+            parts.append("\n".join(lines))
+        if self.cfg.branding.color:
+            parts.append(f"    .footer .brand-name {{ color: {self.cfg.branding.color}; }}")
+        return "\n".join(parts)
 
     # ------------------------------------------------------------------
     # Shared primitives
@@ -403,13 +405,39 @@ class ReportRenderer:
             f"    </div>"
         )
 
-    def _table(self, headers: List[str], rows: List[str]) -> str:
-        thead = "<tr>" + "".join(f"<th>{h}</th>" for h in headers) + "</tr>"
+    def _table(self, headers: List[str], rows: List[str], num_columns: Optional[List[int]] = None) -> str:
+        num_set = set(num_columns or [])
+        th_parts = []
+        for i, h in enumerate(headers):
+            cls = ' class="num"' if i in num_set else ""
+            th_parts.append(f"<th{cls}>{h}</th>")
+        thead = "<tr>" + "".join(th_parts) + "</tr>"
         tbody = "\n".join(rows)
         return f"<table><thead>{thead}</thead><tbody>{tbody}</tbody></table>"
 
     def _charts_grid(self, cards: List[str]) -> str:
         return '    <div class="charts-grid">\n' + "\n".join(cards) + "\n    </div>"
+
+    def _format_datetime(self, iso: str) -> str:
+        """Convert ISO timestamp to human-readable format in configured timezone."""
+        try:
+            from datetime import datetime, timezone as tz, timedelta
+            import re
+            dt = datetime.fromisoformat(iso)
+            tz_name = self.cfg.timezone
+            # Parse offset like "UTC+3", "UTC-5:30", or plain "UTC"
+            m = re.match(r"^UTC([+-])(\d{1,2})(?::(\d{2}))?$", tz_name)
+            if m:
+                sign = 1 if m.group(1) == "+" else -1
+                hours = int(m.group(2))
+                minutes = int(m.group(3) or 0)
+                offset = tz(timedelta(hours=sign * hours, minutes=sign * minutes))
+                dt = dt.astimezone(offset)
+            elif tz_name == "UTC":
+                dt = dt.astimezone(tz.utc)
+            return dt.strftime("%b %d, %Y at %H:%M") + f" {tz_name}"
+        except Exception:
+            return iso
 
     # ------------------------------------------------------------------
     # Body: section orchestration
@@ -534,7 +562,7 @@ class ReportRenderer:
     def _render_regression(self) -> str:
         summary = self._summary_html()
         rows = self._analysis_rows()
-        table = self._table(["Metric", "Baseline", "Current", "Delta", "Status"], rows)
+        table = self._table(["Metric", "Baseline", "Current", "Delta", "Status"], rows, num_columns=[1, 2, 3])
         return self._card("Regression Analysis", summary + table)
 
     def _summary_html(self) -> str:
@@ -595,8 +623,9 @@ class ReportRenderer:
         if not self.endpoint_stats:
             return ""
         headers = [html.escape(c.label) for c in self.cfg.endpoint_columns]
+        num_cols = [i for i, c in enumerate(self.cfg.endpoint_columns) if c.key != "name"]
         rows = self._endpoint_rows()
-        return self._card("Endpoint Statistics", self._table(headers, rows))
+        return self._card("Endpoint Statistics", self._table(headers, rows, num_columns=num_cols))
 
     def _endpoint_rows(self) -> List[str]:
         rows: List[str] = []
@@ -666,7 +695,7 @@ class ReportRenderer:
             )
         else:
             footer_text = (
-                f"{name} \u00b7 "
+                f'<span class="brand-name">{name}</span> \u00b7 '
                 'Powered by <a href="https://github.com/loclocko/locomotive">Locomotive</a>'
             )
         return f'    <div class="footer">{footer_text}</div>'
@@ -744,6 +773,7 @@ class ReportRenderer:
             f"{{ label: {json.dumps(ds.label)}, data: chartData.{ds.key}, "
             f"borderColor: {json.dumps(ds.color)}, backgroundColor: {json.dumps(bg)}, "
             f"fill: {'true' if ds.fill else 'false'}, tension: 0.3, "
+            f"pointRadius: 0, pointHitRadius: 8, borderWidth: 2, "
             f"yAxisID: {json.dumps(y_id)}{dash} }}"
         )
 
