@@ -258,6 +258,19 @@ def _report(
     return str(output)
 
 
+def _gate_status(gate_eval: Dict[str, Any]) -> str:
+    """Derive a single status from gate evaluation results only."""
+    results = gate_eval.get("results") or []
+    statuses = [r.get("status") for r in results if r.get("status") not in (None, "SKIP")]
+    if not statuses:
+        return "PASS"
+    if "DEGRADATION" in statuses:
+        return "DEGRADATION"
+    if "WARNING" in statuses:
+        return "WARNING"
+    return "PASS"
+
+
 def _exit_code_for_status(status: str, fail_on: str) -> int:
     if fail_on == "WARNING" and status in {"WARNING", "DEGRADATION"}:
         return 1
@@ -424,14 +437,12 @@ def cmd_ci(args: argparse.Namespace, config: Dict[str, Any]) -> int:
             # because some level of errors (503) is expected under load
             # In acceptance mode (or when no mode), only set baseline on PASS
             if mode == "resilience":
-                # Check if all gate metrics passed (no DEGRADATION from fail thresholds)
-                gate_status = None
-                if gate_eval and gate_eval.get("results"):
-                    gate_results = gate_eval.get("results", [])
-                    gate_statuses = [r.get("status") for r in gate_results]
-                    # Set baseline only if no gate metrics failed completely
-                    gate_status = "PASS" if all(s in ("PASS", "WARNING", "SKIP") for s in gate_statuses) else "DEGRADATION"
-                set_baseline = gate_status == "PASS" if gate_status else locust_code == 0
+                # In resilience mode, gate results determine baseline eligibility
+                # (regression rules are informational only)
+                if gate_eval:
+                    set_baseline = _gate_status(gate_eval) in ("PASS", "WARNING")
+                else:
+                    set_baseline = locust_code == 0
             else:
                 set_baseline = analysis.get("status") == "PASS"
         else:
@@ -461,6 +472,10 @@ def cmd_ci(args: argparse.Namespace, config: Dict[str, Any]) -> int:
 
     if analysis:
         fail_on = args.fail_on or analysis_cfg.get("fail_on") or "DEGRADATION"
+        # In resilience mode, gate results determine exit code;
+        # regression rules are informational (shown in report but don't fail the build)
+        if mode == "resilience" and gate_eval:
+            return _exit_code_for_status(_gate_status(gate_eval), fail_on)
         return _exit_code_for_status(analysis.get("status"), fail_on)
     return 0
 
