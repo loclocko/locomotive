@@ -61,3 +61,49 @@ class Storage:
             return None
         data = self.load_json(path)
         return data.get("run_id")
+
+    def history_path(self) -> Path:
+        return self.root / "history.json"
+
+    def load_history(self) -> dict:
+        path = self.history_path()
+        if not path.exists():
+            return {"runs": []}
+        return self.load_json(path)
+
+    def append_to_history(
+        self,
+        run_id: str,
+        metrics: dict,
+        run_meta: dict,
+        max_runs: int,
+    ) -> None:
+        """Add the current run to history.json, trimming oldest entries beyond max_runs."""
+        history = self.load_history()
+        runs = history.get("runs") or []
+
+        entry = {
+            "run_id":     run_id,
+            "started_at": run_meta.get("started_at", ""),
+            "rps":        metrics.get("rps"),
+            "avg_ms":     metrics.get("avg_ms"),
+            "median_ms":  metrics.get("median_ms"),
+            "p95_ms":     metrics.get("p95_ms"),
+            "p99_ms":     metrics.get("p99_ms"),
+            "max_ms":     metrics.get("max_ms"),
+            "error_rate": metrics.get("error_rate"),
+            "error_rate_4xx": metrics.get("error_rate_4xx"),
+            "error_rate_5xx": metrics.get("error_rate_5xx"),
+            "error_rate_503": metrics.get("error_rate_503"),
+            "requests":   metrics.get("requests"),
+            "failures":   metrics.get("failures"),
+        }
+
+        # Avoid duplicates if the same run is appended twice (e.g. retries)
+        runs = [r for r in runs if r.get("run_id") != run_id]
+        runs.append(entry)
+
+        if max_runs > 0:
+            runs = runs[-max_runs:]
+
+        self.save_json(self.history_path(), {"runs": runs})

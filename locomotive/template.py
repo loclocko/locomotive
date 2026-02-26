@@ -176,7 +176,9 @@ def generate_template(
         },
         "artifacts": {
             "storage": "artifacts",
-            "run_id": "${GITHUB_SHA:-local}"
+            "run_id": "${GITHUB_SHA:-local}",
+            "history": 30,
+            "_comment_history": "Number of recent runs to keep in history.json for trend charts (0 = disabled)"
         },
         "analysis": {
             "mode": "acceptance",
@@ -219,7 +221,22 @@ def generate_template(
         },
         "report": {
             "title": "Load Test Report",
-            "output": "artifacts/report.html"
+            "output": "artifacts/report.html",
+            "_comment_preset": "Preset: 'default', 'latency', 'throughput', or 'errors'. Applied first, then overrides below.",
+            "theme": {
+                "mode": "light",
+                "_comment_mode": "'light' or 'dark'"
+            },
+            "branding": {
+                "name": "Locomotive",
+                "_comment_name": "Company/project name shown in footer. Set 'color' to override accent color."
+            },
+            "sections": ["kpi", "charts", "regression", "endpoints", "trends"],
+            "_comment_sections": "Controls which sections appear and in what order. Remove to hide.",
+            "trends": {
+                "metrics": ["p95_ms", "rps", "error_rate"],
+                "_comment": "Metrics to show on trend charts. Requires artifacts.history > 0."
+            }
         }
     }
     

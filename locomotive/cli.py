@@ -201,7 +201,11 @@ def _report(
     baseline_id: Optional[str],
     title: str,
     output_path: Optional[str],
+    report_cfg: Optional[Dict[str, Any]] = None,
+    history_runs: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
+    from .report_config import resolve_report_config
+
     run_meta_path = storage.run_meta_path(run_id)
     if run_meta_path.exists():
         run_meta = storage.load_json(run_meta_path)
@@ -226,12 +230,13 @@ def _report(
     if analysis_path.exists():
         analysis = storage.load_json(analysis_path)
 
-    # Load stats history and endpoint stats for enhanced report
-    run_dir = storage.run_dir(run_id)
-    raw_dir = run_dir / "raw"
-
+    raw_dir = storage.run_dir(run_id) / "raw"
     stats_history = load_stats_history(raw_dir / "locust_stats_history.csv")
     endpoint_stats = load_endpoint_stats(raw_dir / "locust_stats.csv")
+
+    cfg = resolve_report_config(report_cfg or {})
+    if title and cfg.title == "CI Load Test Report":
+        cfg.title = title
 
     html = render_report(
         run_meta,
@@ -241,6 +246,8 @@ def _report(
         title,
         stats_history=stats_history,
         endpoint_stats=endpoint_stats,
+        report_config=cfg,
+        history_runs=history_runs,
     )
 
     if output_path:
@@ -356,7 +363,9 @@ def cmd_report(args: argparse.Namespace, config: Dict[str, Any]) -> int:
     title = args.title or report_cfg.get("title") or "CI Load Test Report"
     output_path = args.output or report_cfg.get("output")
 
-    _report(storage, run_id, baseline_id, title, output_path)
+    history_runs = storage.load_history().get("runs", [])
+    _report(storage, run_id, baseline_id, title, output_path,
+            report_cfg=report_cfg, history_runs=history_runs)
     return 0
 
 
@@ -430,9 +439,20 @@ def cmd_ci(args: argparse.Namespace, config: Dict[str, Any]) -> int:
     if set_baseline:
         storage.set_baseline(run_id)
 
+    # Append run to history for trend tracking
+    artifacts_cfg = _get_section(config, "artifacts")
+    max_history = int(artifacts_cfg.get("history", 0))
+    if max_history > 0 and metrics_exist:
+        current_metrics = storage.load_json(metrics_path)
+        run_meta_path = storage.run_meta_path(run_id)
+        run_meta = storage.load_json(run_meta_path) if run_meta_path.exists() else {}
+        storage.append_to_history(run_id, current_metrics, run_meta, max_history)
+
+    history_runs = storage.load_history().get("runs", [])
     title = args.title or report_cfg.get("title") or "CI Load Test Report"
     output_path = args.output or report_cfg.get("output")
-    _report(storage, run_id, baseline_id, title, output_path)
+    _report(storage, run_id, baseline_id, title, output_path,
+            report_cfg=report_cfg, history_runs=history_runs)
 
     if not metrics_exist:
         return locust_code or 1

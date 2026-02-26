@@ -6,8 +6,22 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from .report_config import (
+    DARK_COLORS,
+    METRIC_COLORS,
+    METRIC_LABELS,
+    ChartConfig,
+    ChartDatasetConfig,
+    KpiCardConfig,
+    ReportConfig,
+    resolve_report_config,
+)
 from .utils import utc_now
 
+
+# ---------------------------------------------------------------------------
+# Formatting helpers
+# ---------------------------------------------------------------------------
 
 def _format_value(value: Any, decimals: int = 2) -> str:
     if value is None:
@@ -22,7 +36,7 @@ def _format_delta(value: Any) -> str:
         return "-"
     try:
         v = float(value)
-        arrow = "↑" if v > 0 else "↓" if v < 0 else "→"
+        arrow = "\u2191" if v > 0 else "\u2193" if v < 0 else "\u2192"
         return f"{arrow} {abs(v):.1f}%"
     except (TypeError, ValueError):
         return "-"
@@ -38,150 +52,772 @@ def _format_duration(seconds: float) -> str:
 
 def _status_class(status: str) -> str:
     return {
-        "PASS": "status-pass",
-        "WARNING": "status-warning",
+        "PASS":        "status-pass",
+        "WARNING":     "status-warning",
         "DEGRADATION": "status-fail",
-        "SKIP": "status-skip",
+        "SKIP":        "status-skip",
     }.get(status, "status-unknown")
 
 
 def _delta_class(value: Any, metric: str) -> str:
-    """Return CSS class based on delta direction and metric type."""
     if value is None:
         return ""
     try:
         v = float(value)
-        # For error_rate and response times, decrease is good
-        # For rps, increase is good
         if "rps" in metric.lower():
             return "delta-good" if v > 0 else "delta-bad" if v < 0 else ""
-        else:
-            return "delta-good" if v < 0 else "delta-bad" if v > 0 else ""
+        return "delta-good" if v < 0 else "delta-bad" if v > 0 else ""
     except (TypeError, ValueError):
         return ""
 
 
+# ---------------------------------------------------------------------------
+# CSV loaders
+# ---------------------------------------------------------------------------
+
 def load_stats_history(history_path: Path) -> List[Dict[str, Any]]:
-    """Load locust_stats_history.csv and return as list of dicts."""
     if not history_path.exists():
         return []
-
-    history = []
+    history: List[Dict[str, Any]] = []
     with open(history_path, "r", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            # Only include aggregated rows
-            if row.get("Name") == "Aggregated" or row.get("Name") == "":
+            if row.get("Name") in ("Aggregated", ""):
                 history.append(row)
     return history
 
 
 def load_endpoint_stats(stats_path: Path) -> List[Dict[str, Any]]:
-    """Load locust_stats.csv and return endpoint statistics."""
     if not stats_path.exists():
         return []
-
-    endpoints = []
+    endpoints: List[Dict[str, Any]] = []
     with open(stats_path, "r", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            # Skip aggregated row for endpoint table
             if row.get("Name") and row.get("Name") != "Aggregated":
                 endpoints.append(row)
     return endpoints
 
 
 def _build_chart_data(history: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Build chart data from stats history."""
     if not history:
         return {"labels": [], "rps": [], "users": [], "p50": [], "p95": [], "p99": [], "errors": []}
 
-    labels = []
-    rps_data = []
-    users_data = []
-    p50_data = []
-    p95_data = []
-    p99_data = []
-    errors_data = []
+    labels, rps_data, users_data = [], [], []
+    p50_data, p95_data, p99_data, errors_data = [], [], [], []
+    start_ts: Optional[int] = None
 
-    start_ts = None
     for row in history:
         try:
             ts = int(row.get("Timestamp", 0))
             if start_ts is None:
                 start_ts = ts
-            elapsed = ts - start_ts
-            labels.append(elapsed)
-
+            labels.append(ts - start_ts)
             users_data.append(int(row.get("User Count", 0)))
 
-            rps = row.get("Requests/s", "0")
-            rps_data.append(float(rps) if rps and rps != "N/A" else 0)
+            def _f(key: str) -> Optional[float]:
+                v = row.get(key, "0")
+                return float(v) if v and v != "N/A" else None
 
-            failures = row.get("Failures/s", "0")
-            errors_data.append(float(failures) if failures and failures != "N/A" else 0)
-
-            p50 = row.get("50%", "0")
-            p50_data.append(float(p50) if p50 and p50 != "N/A" else None)
-
-            p95 = row.get("95%", "0")
-            p95_data.append(float(p95) if p95 and p95 != "N/A" else None)
-
-            p99 = row.get("99%", "0")
-            p99_data.append(float(p99) if p99 and p99 != "N/A" else None)
+            rps_data.append(_f("Requests/s") or 0)
+            errors_data.append(_f("Failures/s") or 0)
+            p50_data.append(_f("50%"))
+            p95_data.append(_f("95%"))
+            p99_data.append(_f("99%"))
         except (ValueError, TypeError):
             continue
 
     return {
-        "labels": labels,
-        "rps": rps_data,
-        "users": users_data,
-        "p50": p50_data,
-        "p95": p95_data,
-        "p99": p99_data,
-        "errors": errors_data,
+        "labels": labels, "rps": rps_data, "users": users_data,
+        "p50": p50_data, "p95": p95_data, "p99": p99_data, "errors": errors_data,
     }
 
 
-def _build_endpoint_rows(endpoints: List[Dict[str, Any]]) -> str:
-    """Build HTML rows for endpoint statistics table."""
-    rows = []
-    for ep in endpoints:
-        name = html.escape(f"{ep.get('Type', '')} {ep.get('Name', '')}".strip())
-        requests = ep.get("Request Count", "0")
-        failures = ep.get("Failure Count", "0")
-        avg = ep.get("Average Response Time", "0")
-        p50 = ep.get("50%", "0")
-        p95 = ep.get("95%", "0")
-        p99 = ep.get("99%", "0")
-        max_rt = ep.get("Max Response Time", "0")
-        rps = ep.get("Requests/s", "0")
+# ---------------------------------------------------------------------------
+# Endpoint field extractors
+# ---------------------------------------------------------------------------
 
-        # Calculate error rate for this endpoint
-        try:
-            req_count = int(requests)
-            fail_count = int(failures)
-            error_rate = (fail_count / req_count * 100) if req_count > 0 else 0
-        except (ValueError, ZeroDivisionError):
-            error_rate = 0
+def _ep_safe_float(ep: Dict, key: str) -> float:
+    try:
+        return float(ep.get(key, 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
-        error_class = "error-cell" if error_rate > 0 else ""
 
-        rows.append(
-            f"<tr>"
-            f"<td class='endpoint-name'>{name}</td>"
-            f"<td class='num'>{requests}</td>"
-            f"<td class='num {error_class}'>{failures}</td>"
-            f"<td class='num'>{_format_value(float(avg) if avg else 0, 1)}</td>"
-            f"<td class='num'>{_format_value(float(p50) if p50 else 0, 0)}</td>"
-            f"<td class='num'>{_format_value(float(p95) if p95 else 0, 0)}</td>"
-            f"<td class='num'>{_format_value(float(p99) if p99 else 0, 0)}</td>"
-            f"<td class='num'>{_format_value(float(max_rt) if max_rt else 0, 0)}</td>"
-            f"<td class='num'>{_format_value(float(rps) if rps else 0, 2)}</td>"
-            f"</tr>"
+_ENDPOINT_DISPLAY: Dict[str, Any] = {
+    "name":       lambda ep: html.escape(f"{ep.get('Type', '')} {ep.get('Name', '')}".strip()),
+    "requests":   lambda ep: ep.get("Request Count", "0"),
+    "failures":   lambda ep: ep.get("Failure Count", "0"),
+    "avg":        lambda ep: _format_value(_ep_safe_float(ep, "Average Response Time"), 1),
+    "p50":        lambda ep: _format_value(_ep_safe_float(ep, "50%"), 0),
+    "p95":        lambda ep: _format_value(_ep_safe_float(ep, "95%"), 0),
+    "p99":        lambda ep: _format_value(_ep_safe_float(ep, "99%"), 0),
+    "max":        lambda ep: _format_value(_ep_safe_float(ep, "Max Response Time"), 0),
+    "rps":        lambda ep: _format_value(_ep_safe_float(ep, "Requests/s"), 2),
+    "error_rate": lambda ep: _format_value(
+        _ep_safe_float(ep, "Failure Count") / max(_ep_safe_float(ep, "Request Count"), 1) * 100, 2
+    ),
+}
+
+_ENDPOINT_NUMERIC: Dict[str, Any] = {
+    "failures":   lambda ep: _ep_safe_float(ep, "Failure Count"),
+    "avg":        lambda ep: _ep_safe_float(ep, "Average Response Time"),
+    "p50":        lambda ep: _ep_safe_float(ep, "50%"),
+    "p95":        lambda ep: _ep_safe_float(ep, "95%"),
+    "p99":        lambda ep: _ep_safe_float(ep, "99%"),
+    "max":        lambda ep: _ep_safe_float(ep, "Max Response Time"),
+    "rps":        lambda ep: _ep_safe_float(ep, "Requests/s"),
+    "error_rate": lambda ep: (
+        _ep_safe_float(ep, "Failure Count") / max(_ep_safe_float(ep, "Request Count"), 1) * 100
+    ),
+}
+
+
+# ---------------------------------------------------------------------------
+# ReportRenderer
+# ---------------------------------------------------------------------------
+
+class ReportRenderer:
+    def __init__(
+        self,
+        config: ReportConfig,
+        run_meta: Dict[str, Any],
+        current_metrics: Dict[str, Any],
+        baseline_metrics: Optional[Dict[str, Any]],
+        analysis: Optional[Dict[str, Any]],
+        stats_history: Optional[List[Dict[str, Any]]] = None,
+        endpoint_stats: Optional[List[Dict[str, Any]]] = None,
+        history_runs: Optional[List[Dict[str, Any]]] = None,
+    ):
+        self.cfg = config
+        self.run_meta = run_meta
+        self.current = current_metrics
+        self.baseline = baseline_metrics
+        self.analysis = analysis
+        self.stats_history = stats_history or []
+        self.endpoint_stats = endpoint_stats or []
+        self.history_runs = history_runs or []
+
+        self.status = (analysis.get("status", "PASS") if analysis else "PASS")
+        self.generated_at = utc_now()
+        self.chart_data = _build_chart_data(self.stats_history)
+        self.has_charts = len(self.stats_history) > 2
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def render(self) -> str:
+        body = self._render_body()
+        return self._wrap_document(body)
+
+    # ------------------------------------------------------------------
+    # Document wrapper
+    # ------------------------------------------------------------------
+
+    def _wrap_document(self, body: str) -> str:
+        title_safe = html.escape(self.cfg.title)
+        return (
+            "<!doctype html>\n"
+            '<html lang="en">\n'
+            "<head>\n"
+            '  <meta charset="utf-8" />\n'
+            '  <meta name="viewport" content="width=device-width, initial-scale=1" />\n'
+            f"  <title>{title_safe}</title>\n"
+            '  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>\n'
+            f"  <style>\n{self._build_css()}\n  </style>\n"
+            "</head>\n"
+            "<body>\n"
+            '  <div class="container">\n'
+            f"{body}\n"
+            "  </div>\n"
+            f"{self._build_js()}\n"
+            "</body>\n"
+            "</html>"
         )
-    return "\n".join(rows)
 
+    # ------------------------------------------------------------------
+    # CSS
+    # ------------------------------------------------------------------
+
+    def _build_css(self) -> str:
+        parts = [self._css_base()]
+        if self.cfg.theme.mode == "dark":
+            parts.append(self._css_dark())
+        user = self._css_user_overrides()
+        if user:
+            parts.append(user)
+        return "\n".join(parts)
+
+    def _css_base(self) -> str:
+        return """\
+    :root {
+      --pass: #059669; --pass-bg: #d1fae5;
+      --warn: #d97706; --warn-bg: #fef3c7;
+      --fail: #dc2626; --fail-bg: #fee2e2;
+      --skip: #6b7280; --skip-bg: #f3f4f6;
+      --bg: #f8fafc; --card: #ffffff; --line: #e2e8f0;
+      --text: #1e293b; --text-muted: #64748b;
+      --primary: #3b82f6; --primary-light: #dbeafe;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0; padding: 24px;
+      background: var(--bg); color: var(--text); line-height: 1.5;
+    }
+    .container { max-width: 1400px; margin: 0 auto; }
+
+    .header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 24px; flex-wrap: wrap; gap: 16px;
+    }
+    .title { font-size: 28px; font-weight: 700; margin: 0; }
+    .status-badge-large {
+      padding: 8px 20px; border-radius: 8px;
+      font-weight: 700; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .status-badge-large.pass    { background: var(--pass-bg); color: var(--pass); }
+    .status-badge-large.warning { background: var(--warn-bg); color: var(--warn); }
+    .status-badge-large.fail    { background: var(--fail-bg); color: var(--fail); }
+    .meta { color: var(--text-muted); font-size: 13px; margin-top: 4px; }
+    .meta-ids { font-family: monospace; font-size: 12px; }
+
+    .card {
+      background: var(--card); border: 1px solid var(--line);
+      border-radius: 12px; padding: 20px; margin-bottom: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .card-title {
+      font-size: 14px; font-weight: 600; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.05em;
+      margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
+    }
+    .card-title::before {
+      content: ""; width: 4px; height: 16px;
+      background: var(--primary); border-radius: 2px;
+    }
+
+    .kpi-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px; margin-bottom: 24px;
+    }
+    .kpi-card {
+      background: var(--card); border: 1px solid var(--line);
+      border-radius: 12px; padding: 20px; text-align: center;
+    }
+    .kpi-value { font-size: 32px; font-weight: 700; color: var(--text); line-height: 1.2; }
+    .kpi-unit  { font-size: 16px; font-weight: 400; margin-left: 2px; }
+    .kpi-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 4px; }
+    .kpi-delta { font-size: 13px; margin-top: 8px; min-height: 18px; }
+    .delta-good { color: var(--pass); }
+    .delta-bad  { color: var(--fail); }
+
+    .charts-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      gap: 20px; margin-bottom: 24px;
+    }
+    .chart-container { position: relative; height: 280px; }
+
+    .section-label {
+      font-size: 12px; font-weight: 600; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.08em;
+      margin: 8px 0 12px; display: flex; align-items: center; gap: 8px;
+    }
+    .section-label::after {
+      content: ""; flex: 1; height: 1px; background: var(--line);
+    }
+
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { padding: 12px 16px; border-bottom: 1px solid var(--line); text-align: left; }
+    th {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.05em; color: var(--text-muted); background: var(--bg);
+    }
+    td.num { text-align: right; font-family: monospace; }
+    tr:hover { background: var(--bg); }
+    .endpoint-name { font-weight: 500; }
+
+    .highlight-fail { color: var(--fail); font-weight: 600; }
+    .highlight-warn { color: var(--warn); font-weight: 600; }
+
+    .status-pass    { color: var(--pass); font-weight: 600; }
+    .status-warning { color: var(--warn); font-weight: 600; }
+    .status-fail    { color: var(--fail); font-weight: 600; }
+    .status-skip    { color: var(--skip); }
+
+    .status-summary { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+    .status-badge { padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+    .status-badge.pass    { background: var(--pass-bg); color: var(--pass); }
+    .status-badge.warning { background: var(--warn-bg); color: var(--warn); }
+    .status-badge.fail    { background: var(--fail-bg); color: var(--fail); }
+    .status-badge.skip    { background: var(--skip-bg); color: var(--skip); }
+
+    .info-message {
+      background: var(--warn-bg); border: 1px solid #fbbf24;
+      border-radius: 8px; padding: 12px 16px; font-size: 13px;
+      color: #92400e; margin-bottom: 16px;
+    }
+
+    .footer {
+      text-align: center; padding: 24px;
+      color: var(--text-muted); font-size: 12px;
+    }
+    .footer a { color: var(--primary); text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+
+    @media (max-width: 900px) {
+      .charts-grid { grid-template-columns: 1fr; }
+    }"""
+
+    def _css_dark(self) -> str:
+        lines = ["    :root {"]
+        for var, val in DARK_COLORS.items():
+            lines.append(f"      --{var}: {val};")
+        lines.append("    }")
+        lines.append("    .info-message { color: #fbbf24; border-color: #78350f; }")
+        return "\n".join(lines)
+
+    def _css_user_overrides(self) -> str:
+        colors: Dict[str, str] = {}
+        if self.cfg.branding.color:
+            colors["primary"] = self.cfg.branding.color
+        colors.update(self.cfg.theme.colors)  # theme.colors takes priority
+        if not colors:
+            return ""
+        lines = ["    :root {"]
+        for var, val in colors.items():
+            lines.append(f"      --{var}: {val};")
+        lines.append("    }")
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Shared primitives
+    # ------------------------------------------------------------------
+
+    def _card(self, title: str, content: str) -> str:
+        return (
+            f'    <div class="card">\n'
+            f'      <div class="card-title">{title}</div>\n'
+            f"      {content}\n"
+            f"    </div>"
+        )
+
+    def _table(self, headers: List[str], rows: List[str]) -> str:
+        thead = "<tr>" + "".join(f"<th>{h}</th>" for h in headers) + "</tr>"
+        tbody = "\n".join(rows)
+        return f"<table><thead>{thead}</thead><tbody>{tbody}</tbody></table>"
+
+    def _charts_grid(self, cards: List[str]) -> str:
+        return '    <div class="charts-grid">\n' + "\n".join(cards) + "\n    </div>"
+
+    # ------------------------------------------------------------------
+    # Body: section orchestration
+    # ------------------------------------------------------------------
+
+    def _render_body(self) -> str:
+        _section_map = {
+            "kpi":        self._render_kpi,
+            "charts":     self._render_charts,
+            "regression": self._render_regression,
+            "endpoints":  self._render_endpoints,
+            "trends":     self._render_trends,
+        }
+        parts = [self._render_header()]
+        for section in self.cfg.sections:
+            fn = _section_map.get(section)
+            if fn:
+                rendered = fn()
+                if rendered:
+                    parts.append(rendered)
+        parts.append(self._render_footer())
+        return "\n".join(parts)
+
+    # ------------------------------------------------------------------
+    # Header
+    # ------------------------------------------------------------------
+
+    def _render_header(self) -> str:
+        title_safe = html.escape(self.cfg.title)
+        run_id = html.escape(str(self.run_meta.get("run_id", "-"))[:12])
+        baseline_id = html.escape(str(self.run_meta.get("baseline_id") or "-")[:12])
+        badge_cls = _status_class(self.status).replace("status-", "")
+
+        return (
+            f'    <div class="header">\n'
+            f"      <div>\n"
+            f'        <h1 class="title">{title_safe}</h1>\n'
+            f'        <div class="meta">\n'
+            f"          Generated at {self.generated_at}<br>\n"
+            f'          <span class="meta-ids">Run: {run_id} | Baseline: {baseline_id}</span>\n'
+            f"        </div>\n"
+            f"      </div>\n"
+            f'      <div class="status-badge-large {badge_cls}">{html.escape(self.status)}</div>\n'
+            f"    </div>"
+        )
+
+    # ------------------------------------------------------------------
+    # KPI cards
+    # ------------------------------------------------------------------
+
+    def _render_kpi(self) -> str:
+        cards = "\n".join(self._render_kpi_card(c) for c in self.cfg.kpi_cards)
+        return f'    <div class="kpi-grid">\n{cards}\n    </div>'
+
+    def _render_kpi_card(self, card: KpiCardConfig) -> str:
+        value_html, unit_html, delta_html = self._kpi_parts(card)
+        label_safe = html.escape(card.label)
+        return (
+            f'      <div class="kpi-card">\n'
+            f'        <div class="kpi-value">{value_html}{unit_html}</div>\n'
+            f'        <div class="kpi-label">{label_safe}</div>\n'
+            f'        <div class="kpi-delta">{delta_html}</div>\n'
+            f"      </div>"
+        )
+
+    def _kpi_parts(self, card: KpiCardConfig) -> Tuple[str, str, str]:
+        if card.metric == "duration":
+            run_time = self.run_meta.get("run_time", 60)
+            value_html = _format_duration(run_time) if isinstance(run_time, (int, float)) else str(run_time)
+            return value_html, "", ""
+
+        raw = self.current.get(card.metric, 0) or 0
+        try:
+            val = float(raw) * card.multiplier
+            if card.format == "duration":
+                value_html = _format_duration(val)
+            else:
+                value_html = card.format.format(value=val)
+        except (ValueError, TypeError, KeyError):
+            value_html = str(raw)
+
+        unit_html = (
+            f'<span class="kpi-unit">{html.escape(card.unit)}</span>' if card.unit else ""
+        )
+        delta_html = self._kpi_delta(card.metric, raw)
+        return value_html, unit_html, delta_html
+
+    def _kpi_delta(self, metric: str, current_val: Any) -> str:
+        if not self.baseline or current_val is None:
+            return ""
+        base_val = self.baseline.get(metric)
+        if not base_val:
+            return ""
+        try:
+            d = (float(current_val) - float(base_val)) / float(base_val) * 100
+            cls = _delta_class(d, metric)
+            return f'<span class="{cls}">{_format_delta(d)}</span>'
+        except (TypeError, ValueError, ZeroDivisionError):
+            return ""
+
+    # ------------------------------------------------------------------
+    # Charts
+    # ------------------------------------------------------------------
+
+    def _render_charts(self) -> str:
+        if not self.has_charts:
+            return ""
+        enabled = [(n, c) for n, c in self.cfg.charts.items() if c.enabled]
+        if not enabled:
+            return ""
+        cards = []
+        for name, cfg in enabled:
+            canvas = f"{name}Chart"
+            content = f'<div class="chart-container"><canvas id="{canvas}"></canvas></div>'
+            cards.append(self._card(html.escape(cfg.title or name), content))
+        return self._charts_grid(cards)
+
+    # ------------------------------------------------------------------
+    # Regression analysis
+    # ------------------------------------------------------------------
+
+    def _render_regression(self) -> str:
+        summary = self._summary_html()
+        rows = self._analysis_rows()
+        table = self._table(["Metric", "Baseline", "Current", "Delta", "Status"], rows)
+        return self._card("Regression Analysis", summary + table)
+
+    def _summary_html(self) -> str:
+        if self.analysis and self.analysis.get("summary"):
+            s = self.analysis["summary"]
+            return (
+                '<div class="status-summary">'
+                f'<span class="status-badge pass">{s.get("PASS", 0)} PASS</span>'
+                f'<span class="status-badge warning">{s.get("WARNING", 0)} WARN</span>'
+                f'<span class="status-badge fail">{s.get("DEGRADATION", 0)} FAIL</span>'
+                f'<span class="status-badge skip">{s.get("SKIP", 0)} SKIP</span>'
+                "</div>"
+            )
+        if not self.baseline:
+            return (
+                '<div class="info-message">'
+                "<strong>First run detected:</strong> No baseline available for comparison. "
+                "This run will be used as baseline for future comparisons."
+                "</div>"
+            )
+        return ""
+
+    def _analysis_rows(self) -> List[str]:
+        rows: List[str] = []
+        if self.analysis and self.analysis.get("results"):
+            for res in self.analysis["results"]:
+                status_text = str(res.get("status", ""))
+                delta = res.get("delta_percent")
+                metric = str(res.get("metric", ""))
+                delta_cls = _delta_class(delta, metric)
+                rows.append(
+                    f"<tr>"
+                    f"<td>{html.escape(metric)}</td>"
+                    f"<td class='num'>{_format_value(res.get('baseline'))}</td>"
+                    f"<td class='num'>{_format_value(res.get('current'))}</td>"
+                    f"<td class='num {delta_cls}'>{_format_delta(delta)}</td>"
+                    f"<td class='{_status_class(status_text)}'>{html.escape(status_text)}</td>"
+                    f"</tr>"
+                )
+        else:
+            for key, value in self.current.items():
+                rows.append(
+                    f"<tr>"
+                    f"<td>{html.escape(str(key))}</td>"
+                    f"<td class='num'>-</td>"
+                    f"<td class='num'>{_format_value(value)}</td>"
+                    f"<td class='num'>-</td>"
+                    f"<td class='status-skip'>SKIP</td>"
+                    f"</tr>"
+                )
+        return rows
+
+    # ------------------------------------------------------------------
+    # Endpoint table
+    # ------------------------------------------------------------------
+
+    def _render_endpoints(self) -> str:
+        if not self.endpoint_stats:
+            return ""
+        headers = [html.escape(c.label) for c in self.cfg.endpoint_columns]
+        rows = self._endpoint_rows()
+        return self._card("Endpoint Statistics", self._table(headers, rows))
+
+    def _endpoint_rows(self) -> List[str]:
+        rows: List[str] = []
+        for ep in self.endpoint_stats:
+            cells: List[str] = []
+            for col in self.cfg.endpoint_columns:
+                display_fn = _ENDPOINT_DISPLAY.get(col.key)
+                display = display_fn(ep) if display_fn else "-"
+
+                css_classes: List[str] = []
+                if col.key == "name":
+                    css_classes.append("endpoint-name")
+                else:
+                    css_classes.append("num")
+
+                # Highlight
+                if col.highlight and col.key != "name":
+                    numeric_fn = _ENDPOINT_NUMERIC.get(col.key)
+                    if numeric_fn:
+                        try:
+                            num = numeric_fn(ep)
+                            fail_t = col.highlight.get("fail")
+                            warn_t = col.highlight.get("warn")
+                            if fail_t is not None and num >= fail_t:
+                                css_classes.append("highlight-fail")
+                            elif warn_t is not None and num >= warn_t:
+                                css_classes.append("highlight-warn")
+                        except (TypeError, ValueError):
+                            pass
+
+                cls_attr = f' class="{" ".join(css_classes)}"' if css_classes else ""
+                cells.append(f"<td{cls_attr}>{display}</td>")
+            rows.append(f"<tr>{''.join(cells)}</tr>")
+        return rows
+
+    # ------------------------------------------------------------------
+    # Trends
+    # ------------------------------------------------------------------
+
+    def _render_trends(self) -> str:
+        if len(self.history_runs) < 2:
+            return ""
+        n = len(self.history_runs)
+        cards: List[str] = []
+        for metric in self.cfg.trends.metrics:
+            label = METRIC_LABELS.get(metric, metric)
+            canvas_id = f"trendChart_{metric}"
+            content = f'<div class="chart-container"><canvas id="{canvas_id}"></canvas></div>'
+            cards.append(self._card(f"{label} — last {n} runs", content))
+        if not cards:
+            return ""
+        return (
+            '    <div class="section-label">Performance Trends</div>\n'
+            + self._charts_grid(cards)
+        )
+
+    # ------------------------------------------------------------------
+    # Footer
+    # ------------------------------------------------------------------
+
+    def _render_footer(self) -> str:
+        name = html.escape(self.cfg.branding.name)
+        if self.cfg.branding.name == "Locomotive":
+            footer_text = (
+                'Generated by <a href="https://github.com/loclocko/locomotive">Locomotive</a>'
+                " \u2014 CI/CD Load Testing"
+            )
+        else:
+            footer_text = (
+                f"{name} \u00b7 "
+                'Powered by <a href="https://github.com/loclocko/locomotive">Locomotive</a>'
+            )
+        return f'    <div class="footer">{footer_text}</div>'
+
+    # ------------------------------------------------------------------
+    # JavaScript
+    # ------------------------------------------------------------------
+
+    def _build_js(self) -> str:
+        parts: List[str] = []
+
+        # Main charts
+        if self.has_charts:
+            enabled = [(n, c) for n, c in self.cfg.charts.items() if c.enabled]
+            if enabled:
+                parts.append(f"const chartData = {json.dumps(self.chart_data)};")
+                for name, cfg in enabled:
+                    parts.append(self._chart_init(f"{name}Chart", cfg))
+
+        # Trend charts
+        if "trends" in self.cfg.sections and len(self.history_runs) >= 2:
+            trends_json = self._build_trends_js_data()
+            parts.append(f"const trendsData = {json.dumps(trends_json)};")
+            for metric in self.cfg.trends.metrics:
+                parts.append(self._trend_chart_init(metric))
+
+        if not parts:
+            return ""
+        return "  <script>\n    " + "\n\n    ".join(parts) + "\n  </script>"
+
+    def _chart_init(self, canvas_id: str, cfg: ChartConfig) -> str:
+        has_right = any(ds.y_axis == "right" for ds in cfg.datasets)
+        datasets_str = ",\n          ".join(self._dataset_js(ds) for ds in cfg.datasets)
+
+        if has_right:
+            scales = (
+                "scales: {\n"
+                "          x: { title: { display: true, text: 'Time' } },\n"
+                "          y: { type: 'linear', position: 'left', title: { display: true, text: 'Requests/s' }, min: 0 },\n"
+                "          y1: { type: 'linear', position: 'right', title: { display: true, text: 'Users' }, grid: { drawOnChartArea: false }, min: 0 }\n"
+                "        }"
+            )
+        else:
+            y_label = "Response Time (ms)" if "response" in canvas_id.lower() else "Value"
+            scales = (
+                f"scales: {{\n"
+                f"          x: {{ title: {{ display: true, text: 'Time' }} }},\n"
+                f"          y: {{ title: {{ display: true, text: '{y_label}' }}, min: 0 }}\n"
+                f"        }}"
+            )
+
+        return (
+            f"new Chart(document.getElementById({json.dumps(canvas_id)}), {{\n"
+            f"      type: 'line',\n"
+            f"      data: {{\n"
+            f"        labels: chartData.labels.map(t => t + 's'),\n"
+            f"        datasets: [\n"
+            f"          {datasets_str}\n"
+            f"        ]\n"
+            f"      }},\n"
+            f"      options: {{\n"
+            f"        responsive: true, maintainAspectRatio: false,\n"
+            f"        interaction: {{ mode: 'index', intersect: false }},\n"
+            f"        plugins: {{ legend: {{ position: 'top' }} }},\n"
+            f"        {scales}\n"
+            f"      }}\n"
+            f"    }});"
+        )
+
+    def _dataset_js(self, ds: ChartDatasetConfig) -> str:
+        bg = f"{ds.color}26" if ds.fill else "transparent"
+        dash = f", borderDash: {json.dumps(ds.dash)}" if ds.dash else ""
+        y_id = "y1" if ds.y_axis == "right" else "y"
+        return (
+            f"{{ label: {json.dumps(ds.label)}, data: chartData.{ds.key}, "
+            f"borderColor: {json.dumps(ds.color)}, backgroundColor: {json.dumps(bg)}, "
+            f"fill: {'true' if ds.fill else 'false'}, tension: 0.3, "
+            f"yAxisID: {json.dumps(y_id)}{dash} }}"
+        )
+
+    def _build_trends_js_data(self) -> Dict[str, Any]:
+        labels: List[str] = []
+        for run in self.history_runs:
+            started = run.get("started_at", "")
+            try:
+                date_part = started[:10]
+                time_part = started[11:16]
+                from datetime import datetime
+                dt = datetime.strptime(date_part, "%Y-%m-%d")
+                label = dt.strftime("%b %d") + " " + time_part
+            except (ValueError, TypeError):
+                label = str(run.get("run_id", "?"))[:8]
+            labels.append(label)
+
+        data: Dict[str, Any] = {"labels": labels}
+        n = len(self.history_runs)
+        for metric in self.cfg.trends.metrics:
+            values = []
+            for run in self.history_runs:
+                v = run.get(metric)
+                values.append(float(v) if v is not None else None)
+            # Last point = current run → True, rest False
+            is_current = [False] * n
+            if n > 0:
+                is_current[-1] = True
+            data[metric] = {"values": values, "is_current": is_current}
+        return data
+
+    def _trend_chart_init(self, metric: str) -> str:
+        color = METRIC_COLORS.get(metric, "#3b82f6")
+        label = METRIC_LABELS.get(metric, metric)
+        canvas_id = f"trendChart_{metric}"
+        n = len(self.history_runs)
+
+        point_colors = [f"{color}80"] * n
+        point_sizes  = [3] * n
+        if n > 0:
+            point_colors[-1] = color
+            point_sizes[-1]  = 7
+
+        return (
+            f"new Chart(document.getElementById({json.dumps(canvas_id)}), {{\n"
+            f"      type: 'line',\n"
+            f"      data: {{\n"
+            f"        labels: trendsData.labels,\n"
+            f"        datasets: [{{\n"
+            f"          label: {json.dumps(label)},\n"
+            f"          data: trendsData[{json.dumps(metric)}].values,\n"
+            f"          borderColor: {json.dumps(color)},\n"
+            f"          backgroundColor: {json.dumps(color + '19')},\n"
+            f"          pointBackgroundColor: {json.dumps(point_colors)},\n"
+            f"          pointRadius: {json.dumps(point_sizes)},\n"
+            f"          fill: true, tension: 0.3\n"
+            f"        }}]\n"
+            f"      }},\n"
+            f"      options: {{\n"
+            f"        responsive: true, maintainAspectRatio: false,\n"
+            f"        interaction: {{ mode: 'index', intersect: false }},\n"
+            f"        plugins: {{ legend: {{ position: 'top' }} }},\n"
+            f"        scales: {{\n"
+            f"          x: {{ title: {{ display: true, text: 'Run' }} }},\n"
+            f"          y: {{ title: {{ display: true, text: {json.dumps(label)} }}, min: 0 }}\n"
+            f"        }}\n"
+            f"      }}\n"
+            f"    }});"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Public API (backward-compatible)
+# ---------------------------------------------------------------------------
 
 def render_report(
     run_meta: Dict[str, Any],
@@ -191,526 +827,21 @@ def render_report(
     title: str,
     stats_history: Optional[List[Dict[str, Any]]] = None,
     endpoint_stats: Optional[List[Dict[str, Any]]] = None,
+    report_config: Optional[ReportConfig] = None,
+    history_runs: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
-    status = analysis.get("status") if analysis else "PASS"
-    generated_at = utc_now()
+    if report_config is None:
+        report_config = resolve_report_config({"title": title})
+    elif title and report_config.title == "CI Load Test Report":
+        report_config.title = title
 
-    # Build analysis rows
-    analysis_rows: List[str] = []
-    if analysis and analysis.get("results"):
-        for res in analysis["results"]:
-            status_text = str(res.get("status"))
-            delta = res.get("delta_percent")
-            metric = str(res.get("metric", ""))
-            delta_cls = _delta_class(delta, metric)
-            analysis_rows.append(
-                "<tr>"
-                f"<td>{html.escape(metric)}</td>"
-                f"<td class='num'>{_format_value(res.get('baseline'))}</td>"
-                f"<td class='num'>{_format_value(res.get('current'))}</td>"
-                f"<td class='num {delta_cls}'>{_format_delta(delta)}</td>"
-                f"<td class='{_status_class(status_text)}'>{html.escape(status_text)}</td>"
-                "</tr>"
-            )
-    else:
-        for key, value in current_metrics.items():
-            analysis_rows.append(
-                "<tr>"
-                f"<td>{html.escape(str(key))}</td>"
-                "<td class='num'>-</td>"
-                f"<td class='num'>{_format_value(value)}</td>"
-                "<td class='num'>-</td>"
-                "<td class='status-skip'>SKIP</td>"
-                "</tr>"
-            )
-
-    # Build summary HTML
-    summary_html = ""
-    if analysis and analysis.get("summary"):
-        summary = analysis["summary"]
-        summary_html = f"""
-        <div class="status-summary">
-            <span class="status-badge pass">{summary.get('PASS', 0)} PASS</span>
-            <span class="status-badge warning">{summary.get('WARNING', 0)} WARN</span>
-            <span class="status-badge fail">{summary.get('DEGRADATION', 0)} FAIL</span>
-            <span class="status-badge skip">{summary.get('SKIP', 0)} SKIP</span>
-        </div>
-        """
-    elif not baseline_metrics:
-        summary_html = """
-        <div class="info-message">
-            <strong>First run detected:</strong> No baseline available for comparison.
-            This run will be used as baseline for future comparisons.
-        </div>
-        """
-
-    # Build chart data
-    chart_data = _build_chart_data(stats_history or [])
-    chart_data_json = json.dumps(chart_data)
-
-    # Build endpoint rows
-    endpoint_rows = _build_endpoint_rows(endpoint_stats or [])
-    has_endpoints = bool(endpoint_stats)
-
-    # Calculate test duration
-    run_time = run_meta.get("run_time", 60)
-    duration_str = _format_duration(run_time) if isinstance(run_time, (int, float)) else str(run_time)
-
-    # Get KPI values
-    rps = current_metrics.get("rps", 0)
-    avg_ms = current_metrics.get("avg_ms", 0)
-    p95_ms = current_metrics.get("p95_ms", 0)
-    p99_ms = current_metrics.get("p99_ms", 0)
-    error_rate = current_metrics.get("error_rate", 0)
-    total_requests = current_metrics.get("requests", 0)
-    total_failures = current_metrics.get("failures", 0)
-
-    # Delta values for KPIs
-    rps_delta = ""
-    avg_delta = ""
-    p95_delta = ""
-    error_delta = ""
-
-    if baseline_metrics:
-        if baseline_metrics.get("rps"):
-            d = (rps - baseline_metrics["rps"]) / baseline_metrics["rps"] * 100
-            rps_delta = f'<span class="{_delta_class(d, "rps")}">{_format_delta(d)}</span>'
-        if baseline_metrics.get("avg_ms"):
-            d = (avg_ms - baseline_metrics["avg_ms"]) / baseline_metrics["avg_ms"] * 100
-            avg_delta = f'<span class="{_delta_class(d, "avg_ms")}">{_format_delta(d)}</span>'
-        if baseline_metrics.get("p95_ms"):
-            d = (p95_ms - baseline_metrics["p95_ms"]) / baseline_metrics["p95_ms"] * 100
-            p95_delta = f'<span class="{_delta_class(d, "p95_ms")}">{_format_delta(d)}</span>'
-        if baseline_metrics.get("error_rate"):
-            d = (error_rate - baseline_metrics["error_rate"]) / baseline_metrics["error_rate"] * 100 if baseline_metrics["error_rate"] > 0 else 0
-            error_delta = f'<span class="{_delta_class(d, "error_rate")}">{_format_delta(d)}</span>'
-
-    title_safe = html.escape(title)
-    run_id = html.escape(str(run_meta.get("run_id", "-"))[:12])
-    baseline_id = html.escape(str(run_meta.get("baseline_id") or "-")[:12])
-
-    has_charts = bool(stats_history and len(stats_history) > 2)
-
-    return f'''<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{title_safe}</title>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <style>
-    :root {{
-      --pass: #059669;
-      --pass-bg: #d1fae5;
-      --warn: #d97706;
-      --warn-bg: #fef3c7;
-      --fail: #dc2626;
-      --fail-bg: #fee2e2;
-      --skip: #6b7280;
-      --skip-bg: #f3f4f6;
-      --bg: #f8fafc;
-      --card: #ffffff;
-      --line: #e2e8f0;
-      --text: #1e293b;
-      --text-muted: #64748b;
-      --primary: #3b82f6;
-      --primary-light: #dbeafe;
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      margin: 0;
-      padding: 24px;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.5;
-    }}
-    .container {{ max-width: 1400px; margin: 0 auto; }}
-
-    /* Header */
-    .header {{
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 24px;
-      flex-wrap: wrap;
-      gap: 16px;
-    }}
-    .header-left {{ display: flex; align-items: center; gap: 16px; }}
-    .title {{ font-size: 28px; font-weight: 700; margin: 0; }}
-    .status-badge-large {{
-      padding: 8px 20px;
-      border-radius: 8px;
-      font-weight: 700;
-      font-size: 14px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }}
-    .status-badge-large.pass {{ background: var(--pass-bg); color: var(--pass); }}
-    .status-badge-large.warning {{ background: var(--warn-bg); color: var(--warn); }}
-    .status-badge-large.fail {{ background: var(--fail-bg); color: var(--fail); }}
-    .meta {{ color: var(--text-muted); font-size: 13px; }}
-    .meta-ids {{ font-family: monospace; font-size: 12px; }}
-
-    /* Cards */
-    .card {{
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 20px;
-      margin-bottom: 20px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-    }}
-    .card-title {{
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin-bottom: 16px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }}
-    .card-title::before {{
-      content: "";
-      width: 4px;
-      height: 16px;
-      background: var(--primary);
-      border-radius: 2px;
-    }}
-
-    /* KPI Grid */
-    .kpi-grid {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 16px;
-      margin-bottom: 24px;
-    }}
-    .kpi-card {{
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 20px;
-      text-align: center;
-    }}
-    .kpi-value {{
-      font-size: 32px;
-      font-weight: 700;
-      color: var(--text);
-      line-height: 1.2;
-    }}
-    .kpi-label {{
-      font-size: 12px;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin-top: 4px;
-    }}
-    .kpi-delta {{
-      font-size: 13px;
-      margin-top: 8px;
-    }}
-    .delta-good {{ color: var(--pass); }}
-    .delta-bad {{ color: var(--fail); }}
-
-    /* Charts */
-    .charts-grid {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-      gap: 20px;
-      margin-bottom: 24px;
-    }}
-    .chart-container {{
-      position: relative;
-      height: 280px;
-    }}
-
-    /* Tables */
-    table {{
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 14px;
-    }}
-    th, td {{
-      padding: 12px 16px;
-      border-bottom: 1px solid var(--line);
-      text-align: left;
-    }}
-    th {{
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
-      background: var(--bg);
-    }}
-    td.num {{ text-align: right; font-family: monospace; }}
-    tr:hover {{ background: var(--bg); }}
-    .endpoint-name {{ font-weight: 500; }}
-    .error-cell {{ color: var(--fail); font-weight: 600; }}
-
-    /* Status classes */
-    .status-pass {{ color: var(--pass); font-weight: 600; }}
-    .status-warning {{ color: var(--warn); font-weight: 600; }}
-    .status-fail {{ color: var(--fail); font-weight: 600; }}
-    .status-skip {{ color: var(--skip); }}
-
-    /* Status summary */
-    .status-summary {{
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-    }}
-    .status-badge {{
-      padding: 4px 12px;
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 600;
-    }}
-    .status-badge.pass {{ background: var(--pass-bg); color: var(--pass); }}
-    .status-badge.warning {{ background: var(--warn-bg); color: var(--warn); }}
-    .status-badge.fail {{ background: var(--fail-bg); color: var(--fail); }}
-    .status-badge.skip {{ background: var(--skip-bg); color: var(--skip); }}
-
-    /* Info message */
-    .info-message {{
-      background: var(--warn-bg);
-      border: 1px solid #fbbf24;
-      border-radius: 8px;
-      padding: 12px 16px;
-      font-size: 13px;
-      color: #92400e;
-    }}
-
-    /* Footer */
-    .footer {{
-      text-align: center;
-      padding: 24px;
-      color: var(--text-muted);
-      font-size: 12px;
-    }}
-    .footer a {{ color: var(--primary); text-decoration: none; }}
-    .footer a:hover {{ text-decoration: underline; }}
-
-    /* Two columns layout */
-    .two-cols {{
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
-    }}
-    @media (max-width: 900px) {{
-      .two-cols {{ grid-template-columns: 1fr; }}
-      .charts-grid {{ grid-template-columns: 1fr; }}
-    }}
-  </style>
-</head>
-<body>
-  <div class="container">
-    <!-- Header -->
-    <div class="header">
-      <div>
-        <h1 class="title">{title_safe}</h1>
-        <div class="meta">
-          Generated at {generated_at}<br>
-          <span class="meta-ids">Run: {run_id} | Baseline: {baseline_id}</span>
-        </div>
-      </div>
-      <div class="status-badge-large {_status_class(status).replace('status-', '')}">{html.escape(status)}</div>
-    </div>
-
-    <!-- KPI Cards -->
-    <div class="kpi-grid">
-      <div class="kpi-card">
-        <div class="kpi-value">{_format_value(rps, 1)}</div>
-        <div class="kpi-label">Requests/sec</div>
-        <div class="kpi-delta">{rps_delta}</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-value">{_format_value(avg_ms, 0)}<span style="font-size:16px">ms</span></div>
-        <div class="kpi-label">Avg Response</div>
-        <div class="kpi-delta">{avg_delta}</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-value">{_format_value(p95_ms, 0)}<span style="font-size:16px">ms</span></div>
-        <div class="kpi-label">P95 Response</div>
-        <div class="kpi-delta">{p95_delta}</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-value">{_format_value(error_rate, 2)}<span style="font-size:16px">%</span></div>
-        <div class="kpi-label">Error Rate</div>
-        <div class="kpi-delta">{error_delta}</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-value">{total_requests:,}</div>
-        <div class="kpi-label">Total Requests</div>
-        <div class="kpi-delta">{total_failures} failures</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-value">{duration_str}</div>
-        <div class="kpi-label">Duration</div>
-      </div>
-    </div>
-
-    {'<!-- Charts -->' if has_charts else '<!-- No chart data available -->'}
-    {f'''
-    <div class="charts-grid">
-      <div class="card">
-        <div class="card-title">Throughput & Users Over Time</div>
-        <div class="chart-container">
-          <canvas id="throughputChart"></canvas>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title">Response Time Percentiles</div>
-        <div class="chart-container">
-          <canvas id="responseChart"></canvas>
-        </div>
-      </div>
-    </div>
-    ''' if has_charts else ''}
-
-    <!-- Analysis & Endpoints -->
-    <div class="two-cols">
-      <div class="card">
-        <div class="card-title">Regression Analysis</div>
-        {summary_html}
-        <table>
-          <thead>
-            <tr>
-              <th>Metric</th>
-              <th>Baseline</th>
-              <th>Current</th>
-              <th>Delta</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {"".join(analysis_rows)}
-          </tbody>
-        </table>
-      </div>
-
-      {'<div class="card"><div class="card-title">Endpoint Statistics</div><table><thead><tr><th>Endpoint</th><th>Requests</th><th>Failures</th><th>Avg</th><th>P50</th><th>P95</th><th>P99</th><th>Max</th><th>RPS</th></tr></thead><tbody>' + endpoint_rows + '</tbody></table></div>' if has_endpoints else ''}
-    </div>
-
-    <!-- Footer -->
-    <div class="footer">
-      Generated by <a href="https://github.com/loclocko/locomotive">Locomotive</a> - CI/CD Load Testing
-    </div>
-  </div>
-
-  {f'''
-  <script>
-    const chartData = {chart_data_json};
-
-    // Throughput & Users Chart
-    new Chart(document.getElementById('throughputChart'), {{
-      type: 'line',
-      data: {{
-        labels: chartData.labels.map(t => t + 's'),
-        datasets: [
-          {{
-            label: 'RPS',
-            data: chartData.rps,
-            borderColor: '#3b82f6',
-            backgroundColor: 'rgba(59, 130, 246, 0.1)',
-            fill: true,
-            tension: 0.3,
-            yAxisID: 'y'
-          }},
-          {{
-            label: 'Users',
-            data: chartData.users,
-            borderColor: '#8b5cf6',
-            backgroundColor: 'transparent',
-            borderDash: [5, 5],
-            tension: 0.3,
-            yAxisID: 'y1'
-          }},
-          {{
-            label: 'Errors/s',
-            data: chartData.errors,
-            borderColor: '#ef4444',
-            backgroundColor: 'rgba(239, 68, 68, 0.1)',
-            fill: true,
-            tension: 0.3,
-            yAxisID: 'y'
-          }}
-        ]
-      }},
-      options: {{
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: {{ mode: 'index', intersect: false }},
-        plugins: {{
-          legend: {{ position: 'top' }}
-        }},
-        scales: {{
-          x: {{ title: {{ display: true, text: 'Time' }} }},
-          y: {{
-            type: 'linear',
-            position: 'left',
-            title: {{ display: true, text: 'Requests/s' }},
-            min: 0
-          }},
-          y1: {{
-            type: 'linear',
-            position: 'right',
-            title: {{ display: true, text: 'Users' }},
-            grid: {{ drawOnChartArea: false }},
-            min: 0
-          }}
-        }}
-      }}
-    }});
-
-    // Response Time Chart
-    new Chart(document.getElementById('responseChart'), {{
-      type: 'line',
-      data: {{
-        labels: chartData.labels.map(t => t + 's'),
-        datasets: [
-          {{
-            label: 'P50',
-            data: chartData.p50,
-            borderColor: '#10b981',
-            backgroundColor: 'transparent',
-            tension: 0.3
-          }},
-          {{
-            label: 'P95',
-            data: chartData.p95,
-            borderColor: '#f59e0b',
-            backgroundColor: 'transparent',
-            tension: 0.3
-          }},
-          {{
-            label: 'P99',
-            data: chartData.p99,
-            borderColor: '#ef4444',
-            backgroundColor: 'transparent',
-            tension: 0.3
-          }}
-        ]
-      }},
-      options: {{
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: {{ mode: 'index', intersect: false }},
-        plugins: {{
-          legend: {{ position: 'top' }}
-        }},
-        scales: {{
-          x: {{ title: {{ display: true, text: 'Time' }} }},
-          y: {{
-            title: {{ display: true, text: 'Response Time (ms)' }},
-            min: 0
-          }}
-        }}
-      }}
-    }});
-  </script>
-  ''' if has_charts else ''}
-</body>
-</html>'''
+    return ReportRenderer(
+        config=report_config,
+        run_meta=run_meta,
+        current_metrics=current_metrics,
+        baseline_metrics=baseline_metrics,
+        analysis=analysis,
+        stats_history=stats_history,
+        endpoint_stats=endpoint_stats,
+        history_runs=history_runs,
+    ).render()

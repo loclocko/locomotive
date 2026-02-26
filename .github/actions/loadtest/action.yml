@@ -187,6 +187,34 @@ runs:
         path: loadtest-artifacts/
         retention-days: 30
 
+    - name: Trim old runs from baseline artifact
+      if: inputs.set_baseline == 'true'
+      shell: bash
+      run: |
+        BASELINE_FILE="loadtest-artifacts/baseline.json"
+        if [ ! -f "$BASELINE_FILE" ]; then
+          echo "No baseline.json found, skipping trim"
+          exit 0
+        fi
+        BASELINE_RUN=$(python3 -c "
+import json
+data = json.load(open('$BASELINE_FILE'))
+print(data.get('run_id', ''))
+" 2>/dev/null || echo "")
+        if [ -z "$BASELINE_RUN" ]; then
+          echo "Could not determine baseline run_id, skipping trim"
+          exit 0
+        fi
+        echo "Keeping only baseline run: $BASELINE_RUN"
+        for dir in loadtest-artifacts/runs/*/; do
+          [ -d "$dir" ] || continue
+          dir_name=$(basename "$dir")
+          if [ "$dir_name" != "$BASELINE_RUN" ]; then
+            echo "Removing old run: $dir_name"
+            rm -rf "$dir"
+          fi
+        done
+
     - name: Upload baseline
       if: inputs.set_baseline == 'true' && always()
       uses: actions/upload-artifact@v4
