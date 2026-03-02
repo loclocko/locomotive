@@ -271,6 +271,7 @@ class ReportRenderer:
     .header {
       display: flex; align-items: center; justify-content: space-between;
       margin-bottom: 24px; flex-wrap: wrap; gap: 16px;
+      border-bottom: 3px solid var(--primary); padding-bottom: 20px;
     }
     .title { font-size: 28px; font-weight: 700; margin: 0; }
     .status-badge-large {
@@ -287,6 +288,7 @@ class ReportRenderer:
       background: var(--card); border: 1px solid var(--line);
       border-radius: 12px; padding: 20px; margin-bottom: 20px;
       box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      border-top: 3px solid var(--primary);
     }
     .card-title {
       font-size: 14px; font-weight: 600; color: var(--text-muted);
@@ -305,6 +307,7 @@ class ReportRenderer:
     .kpi-card {
       background: var(--card); border: 1px solid var(--line);
       border-radius: 12px; padding: 20px; text-align: center;
+      border-top: 3px solid var(--primary);
     }
     .kpi-value { font-size: 32px; font-weight: 700; color: var(--text); line-height: 1.2; }
     .kpi-unit  { font-size: 16px; font-weight: 400; margin-left: 2px; }
